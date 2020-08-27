@@ -233,63 +233,7 @@ set_Data_Model_Dir <- function(dataFile, modelName){
 
 ```
 
-
-
-
-
-
-data generated with soverdispersed model 
-
-```{r}
-data = list()
-modelName <- "t_norm_0mu"
-file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
-mod <- cmdstan_model(file)
-N = 100 #(bins = 20)*N # num of sim and fit
-M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
-delivDir <- set_Model_Dir(modelName)$delivDir
-for (hp_sd in 1:5){
-  data$hp_sd = hp_sd
-  submodelName = paste0(modelName, hp_sd)
-  sbc_res_t_normal_sd <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
-  uniformity.sbc(sbc_res_t_normal_sd, submodelName)
-  plot.sbc(sbc_res_t_normal_sd, submodelName)
-}
-```
-
-```{r}
-data = list()
-modelName <- "t_norm_nu"
-file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
-mod <- cmdstan_model(file)
-N = 100 #(bins = 20)*N # num of sim and fit
-M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
-delivDir <- set_Model_Dir(modelName)$delivDir
-for (hp_nu in 1:5){
-  data$hp_nu = hp_nu
-  submodelName = paste0(modelName, hp_nu)
-  sbc_res_t_normal_sd <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
-  uniformity.sbc(sbc_res_t_normal_sd, submodelName)
-  plot.sbc(sbc_res_t_normal_sd, submodelName)
-}
-```
-```{r}
-data = list()
-modelName <- "t_norm_nu_mu0"
-file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
-mod <- cmdstan_model(file)
-N = 100 #(bins = 20)*N # num of sim and fit
-M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
-delivDir <- set_Model_Dir(modelName)$delivDir
-for (hp_nu in 1:5){
-  data$hp_nu = hp_nu
-  submodelName = paste0(modelName, hp_nu)
-  sbc_res_t_normal_sd <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
-  uniformity.sbc(sbc_res_t_normal_sd, submodelName)
-  plot.sbc(sbc_res_t_normal_sd, submodelName)
-}
-```
-
+## 1. normal with different sd normal
 ```{r}
 data = list()
 modelName <- "norm_var"
@@ -307,6 +251,7 @@ for (hp in c(1,10,100)){
 }
 ```
 
+## 2. negative binomial with poisson - overdispersed poisson
 ```{r}
 data = list()
 modelName <- "nb_pois"
@@ -324,25 +269,24 @@ for (hp in c(1, 10, 100)){
 }
 ```
 
+## 3.t with normal - degree of freedom
 ```{r}
 data = list()
-modelName <- "nb_pois_lambda"
+modelName <- "t_norm_nu_mu0"
 file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
 mod <- cmdstan_model(file)
-N = 10 #(bins = 20)*N # num of sim and fit
+N = 100 #(bins = 20)*N # num of sim and fit
 M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
 delivDir <- set_Model_Dir(modelName)$delivDir
-for (hp_lambda in 1:5){
-  data$hp_lambda = hp_lambda
-  submodelName = paste0(modelName, hp_lambda)
-  sbc_res_nb_pois_lambda <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
-  uniformity.sbc(sbc_res_nb_pois_lambda)
-  plot.sbc(sbc_res_nb_pois_lambda, submodelName)
+for (hp_nu in 1:5){
+  data$hp_nu = hp_nu
+  submodelName = paste0(modelName, hp_nu)
+  sbc_res_t_normal_sd <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
+  uniformity.sbc(sbc_res_t_normal_sd, submodelName)
+  plot.sbc(sbc_res_t_normal_sd, submodelName)
 }
 ```
 
-
-what is g(\theta)
 
 $$
 \begin{aligned} \tilde{\theta} & \sim \pi_{\mathrm{S}}(\theta) \\ \tilde{y} & \sim \pi_{\mathrm{S}}(y \mid \tilde{\theta}) \\\left(\tilde{\theta}_{1}^{\prime}, \ldots, \tilde{\theta}_{L}^{\prime}\right) & \sim \pi(\theta \mid \tilde{y}) \end{aligned}
