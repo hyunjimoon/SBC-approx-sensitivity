@@ -1698,8 +1698,37 @@ cmdstanfit &lt;- function(modelName, data, fixed_param, chains = 4){
     fit$save_object(file = prefit)
   }
   fit
-}
-sf &lt;- cmdstanfit(modelName, data= data, fixed_param = TRUE, chains = 1)
+}</code></pre>
+<pre class="r"><code>writeLines(readLines(&#39;models/normal_sbc/normal_sbc.stan&#39;))</code></pre>
+<pre><code>## data{
+##   int N; 
+##   int B; // num of Boostrap
+##   vector[N] w;
+## }
+## 
+## transformed data {
+##   real mu_ = normal_rng(0, 1);
+##   real&lt;lower = 0&gt; sigma_ = lognormal_rng(0, 1);
+##   int K = 5;
+##   vector[N] y;
+##   matrix[K,B] BS;
+##   int I[K];
+##   for (n in 1:N)
+##     y[n] = normal_rng(mu_, sigma_);
+##   
+##   for(b in 1:B){
+##     for(k in 1:K)
+##       I[k] = categorical_rng(w);
+##       print(I);
+##       BS[,b] = y[I];
+##   }
+## }
+## 
+## generated quantities {
+##   matrix[K,B] BS0;
+##   BS0 = BS;
+## }</code></pre>
+<pre class="r"><code>sf &lt;- cmdstanfit(modelName, data= data, fixed_param = TRUE, chains = 1)
 
 BS &lt;- matrix(sf$draws(variables = c(&quot;BS0&quot;)), ncol= B)
 BS</code></pre>
