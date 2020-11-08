@@ -1,0 +1,39 @@
+library(rstan); library(cmdstanr); library(parallel); library("tidyverse"); library(dplyr)
+set.seed(1954)
+.libPaths("~/Rlib")
+options(mc.cores = parallel::detectCores())
+source(file.path("tools", "cmdStanTools.r"))
+source(file.path("tools", "sbcTools.r"))
+
+modelName <- "normal_sbc"
+B = 100
+N = 20
+data = list(N = N, B = B, w = rep(1/20, 20))
+cmdstanfit <- function(modelName, data, fixed_param, chains = 4){
+  parallel_chains <- min(chains, detectCores())
+  scriptDir <- getwd()
+  modelDir <- file.path(scriptDir, "models")
+  delivDir <- file.path(scriptDir, "deliv", modelName)
+  prefit <- file.path(delivDir, paste0(modelName, ".rda"))
+  stanfile <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
+  
+  if (file.exists(prefit)){
+    fit <- readRDS(prefit)
+  }else{ 
+    mod <- cmdstan_model(stanfile, quiet = FALSE)
+    iter_warmup = 100
+    iter_sampling = 100
+    if(fixed_param){
+      iter_warmup = 0
+      iter_sampling = 1}
+    fit <- mod$sample(data, chains = chains, iter_warmup = iter_warmup, iter_sampling = iter_sampling,
+                      parallel_chains = parallel_chains, fixed_param = fixed_param, save_warmup = FALSE)
+    dir.create(delivDir)
+    fit$save_object(file = prefit)
+  }
+  fit
+}
+sf <- cmdstanfit(modelName, data= data, fixed_param = TRUE, chains = 1)
+
+BS <- matrix(sf$draws(variables = c("BS0")), ncol= B)
+
