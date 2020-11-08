@@ -1,5 +1,5 @@
 ---
-title: "prostate_cancer_sbc"
+title: "SBC prior sensitiviy"
 output:
   html_document: default
   pdf_document: default
