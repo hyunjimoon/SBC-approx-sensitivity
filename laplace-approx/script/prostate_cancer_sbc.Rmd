@@ -115,11 +115,13 @@ res = set_Data_Model_Dir(dataName, modelName)
 data = res$data
 mod = res$mod
 delivDir = res$delivDir
-N = 100
+N = 600
 L = 297 
 sbc_res_bern_lik <- sbc_new(mod, modelName, data = data, N = N, L = L, save_progress = delivDir)
-#ppc.sbc(sbc_res_bern_lik)
+ppc.sbc(sbc_res_bern_lik,modelName, data)
 uniformity.sbc(sbc_res_bern_lik, modelName)
-plot.sbc(sbc_res_bern_lik, modelName)
+plot.sbc(sbc_res_bern_lik, modelName, data)
 plot.sbc_ecdf(sbc_res_bern_lik, modelName)
 ```
+
+

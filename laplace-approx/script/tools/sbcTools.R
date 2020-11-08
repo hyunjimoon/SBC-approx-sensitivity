@@ -35,7 +35,7 @@ sbc_new <- function(stanmodel, modelName, data, N, L, n_eff_reltol=0.2, ..., sav
     S <- seq(1:N)[n]
     #load if exists
     if (doSave) {
-      file <- sbcFitFile(save_progress, stanmodel,modelName, S) #TODO data chage should be reflected in fitname
+      file <- sbcFitFile(save_progress, stanmodel,modelName, S) #TODO data chage could be reflected in fitname
       if (file.exists(file)) {
         got <- try(load(file), silent=TRUE)
         time <- out$time()['total']
@@ -44,7 +44,7 @@ sbc_new <- function(stanmodel, modelName, data, N, L, n_eff_reltol=0.2, ..., sav
         next
       }
     }
-    #iter_sampling = M = 3 * (20n - 1) # iter_warmup = 500, 597,
+    #iter_sampling = M = 3 * (20n - 1)
     out <- stanmodel$sample(data, chains = 1, iter_warmup = 500, iter_sampling = L, parallel_chains = 1, adapt_delta = 0.8,  save_warmup = FALSE, thin = 1) 
     time <- out$time()['total']
     times <- cbind(times, time)
@@ -55,16 +55,15 @@ sbc_new <- function(stanmodel, modelName, data, N, L, n_eff_reltol=0.2, ..., sav
       save(out, file=file)
     }
   }
-  avg_fit_time = as.numeric(times)
-  write.csv(avg_fit_time, file = file.path(delivDir, paste0(modelName, "_times.csv", sep = "")))
+
   
   # prior predictive distribution
-  # Y <- sapply(post, FUN = function(p) {
-  #   summary <- p$summary()
-  #   summary %>%
-  #     filter(str_detect(variable, "y_$|y_\\[.*\\]")) %>%
-  #     pull(mean) # not mean all same value but for extract purpose
-  # })
+  Y <- sapply(post, FUN = function(p) {
+    summary <- p$summary()
+    summary %>%
+      filter(str_detect(variable, "y_$|y_\\[.*\\]")) %>%
+      pull(mean) # not mean as they are all same value but for extract purpose
+  })
   
   # realizations of parameter
   pars <- sapply(post, FUN = function(p) {
@@ -81,7 +80,7 @@ sbc_new <- function(stanmodel, modelName, data, N, L, n_eff_reltol=0.2, ..., sav
     if (is.null(dim(r))) {
       r <- as.matrix(r)
     }
-    colnames(r) <- c("p2", "p3", "p4", "p5") #pars_names
+    colnames(r) <- pars_names
     r[] <- r > 0
     return(r)
   })
@@ -94,24 +93,13 @@ sbc_new <- function(stanmodel, modelName, data, N, L, n_eff_reltol=0.2, ..., sav
   return(out)
 }
 
+#prior predictive check
 ppc.sbc <- function(x, modelName, data, N = N, thin = 3, ...){
-  # thinner <- seq(from = 1, to = dim(x$Y)[1], by = thin)
-  # yhat <- x$Y[thinner]
-  # if (grepl("dm", modelName, fixed = TRUE)){
-  #   N = length(x$Y) / length(data$ye)
-  # }else{
-  #   N = length(data$y)
-  # }
   N = length(x$time)
   yhat_df<- data.frame(matrix(x$Y, ncol = N))
   names(yhat_df) <- str_replace(names(data.frame(matrix(x$Y, ncol = N))), "X", "y_sim")
   yhat_df$idu <- as.numeric(row.names(yhat_df))
   yhat_df.melt <- reshape2::melt(yhat_df, id.vars="idu")
-  
-  highlight_df <- yhat_df.melt %>%
-    filter(value>=1500) #%>% 
-    #filter(variable == "y_sim1")%>% having multiple extreme y_sim lead to longer fit
-    #select(c(idu, value))
   
   y_df <- data.frame(idu = yhat_df$idu, value = data$y)
   hp_mu <- toString(lapply(c(data$alpha_mu_prior,data$rho_mu_prior), FUN = function(p){round(p, 1)}))
@@ -120,7 +108,7 @@ ppc.sbc <- function(x, modelName, data, N = N, thin = 3, ...){
   plot<- ggplot(yhat_df.melt, aes(idu, value),show.legend = FALSE) + 
     geom_point()+
     theme(legend.position = "none")+
-    geom_point(data = highlight_df, aes(idu, value, color = variable ))+
+    geom_point(data =  yhat_df.melt, aes(idu, value, color = variable ))+
     geom_point(data = y_df, aes(idu, value), color = "red") + 
     ylab(paste0("y_sim, ye ")) + xlab("covariate index")
   
@@ -142,7 +130,7 @@ plot.sbc <- function(x, modelName, bins = 20, thin = 3, ...) {
   sbc_plot <- suppressWarnings(ggplot2::ggplot(d, aes(x = u)) +
                                  geom_histogram(binwidth = binwidth, color = "black", fill = "#ffffe8", boundary = 0) +
                                  facet_wrap(vars(parameter),  scale = "free") + theme(panel.spacing.x = unit(2, "lines"))) + 
-                  geom_polygon(data=data.frame(x=c(-5,0,-5,L+5,L,L+5,-5),y= c(CI[1],CI[2],CI[3],CI[3],CI[2],CI[1],CI[1])),aes(x=x,y=y),fill="grey45",color="grey25",alpha=0.5)
+    geom_polygon(data=data.frame(x=c(-5,0,-5,L+5,L,L+5,-5),y= c(CI[1],CI[2],CI[3],CI[3],CI[2],CI[1],CI[1])),aes(x=x,y=y),fill="grey45",color="grey25",alpha=0.5)
   ggsave(file = file.path(delivDir, paste0(modelName, ".png")), width = 5, height = 5)
   return(sbc_plot)
 }  
@@ -169,17 +157,8 @@ plot.sbc_ecdf <- function(x, modelName, bins = 20, thin = 3, pad = TRUE, size = 
     ggsave(file = file.path(delivDir, paste0(modelName, i, "_ecdf.png")), width = 5, height = 5)
   }
 }
-# wish to use facet_wrap() with the following
-#   melt_d = bayesplot:::validate_yrep(matrix(sample(c(1:L),size = N*500, replace=T),500,N), thinned[,1])
-#   ggplot(melt_d, aes_(x = ~value)) + 
-#     hline_at(c(0, 0.5, 1), size = c(0.2, 0.1, 0.2), linetype = 2, color = bayesplot:::get_color("dh")) + 
-#     stat_ecdf(mapping = aes_(group = ~rep_id, color = "yrep"), geom = "step") + 
-#     stat_ecdf(data = data.frame(value = y), mapping = aes_(color = "y"), 
-#               geom = c("step")) + bayesplot:::scale_color_ppc_dist() + xlab(bayesplot:::y_label()) + 
-#     scale_x_continuous(limits=c(0,100),expand=c(0,0)) + scale_y_continuous(limits=c(0,1),expand=c(0,0),breaks = c(0, 0.5,  1)) +
-#     yaxis_title(FALSE) + xaxis_title(FALSE) + yaxis_ticks(FALSE) +
-#     facet_wrap(vars(parameter),  scale = "free")
 
+# different measures for rank bincount result
 MW1 <- function(bin_count){
   bins <- length(bin_count)
   unif <- rep(1/bins, bins)
@@ -210,7 +189,7 @@ uniformity.sbc <- function(x, modelName, bins = 20, thin = 3){
   pval <- rep(NA, num_params)
   integ_msr <- rep(NA, num_params)
   max_diff <- rep(NA, num_params)
-  bin_counts <- data.frame() #rep(NA, num_params)
+  bin_counts <- data.frame() 
   for (i in 1:num_params){
     bin_count <- rep(0, bins)
     integ <- rep(0, bins)
@@ -218,8 +197,6 @@ uniformity.sbc <- function(x, modelName, bins = 20, thin = 3){
       bin <- ceiling(ranks[m,i] / bin_size)
       bin_count[bin] <- bin_count[bin] + 1
     }
-    # sum of bin_count is N (= total fit number)
-    print(bin_count)
     pval[i] <- MChisq(bin_count)
     integ_msr[i] <- MW1(bin_count)
     max_diff[i] <- MKM(bin_count)
