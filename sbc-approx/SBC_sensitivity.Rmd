@@ -1,0 +1,96 @@
+---
+title: "prostate_cancer_sbc"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  include = TRUE,  cache = FALSE,  collapse = TRUE,  echo = TRUE,
+  message = FALSE, tidy = FALSE,  warning = FALSE,   comment = "  ",
+  dev = "png", dev.args = list(bg = '#FFFFF8'), dpi = 300,
+  fig.align = "center",  fig.width = 7,  fig.asp = 0.618,  fig.show = "hold",
+  out.width = "90%")
+```
+
+
+```{r}
+library(ggplot2);
+theme_set(theme_minimal())
+library(knitr); 
+library(tidyverse);
+library(rstan);
+library(tufte);
+library(parallel);
+library(cmdstanr);
+library(posterior);
+library("bayesplot");
+library("ggplot2");
+options(digits = 2);  options(htmltools.dir.version = FALSE)
+parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
+scriptDir <- getwd()
+modelDir <- file.path(scriptDir, "models")
+dataDir <- file.path(scriptDir, "data")
+nChains <- 4
+parallel_chains <- min(nChains, detectCores())
+
+source(file.path("tools", "cmdStanTools.r"))
+source(file.path("tools", "sbcTools.r"))
+```
+
+
+## 1. normal with different sd normal
+```{r}
+data = list()
+modelName <- "norm_var"
+file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
+mod <- cmdstan_model(file)
+N = 500 #(bins = 20)*N # num of sim and fit
+M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
+delivDir <- set_Model_Dir(modelName)$delivDir
+for (hp in c(0.001, 1)){
+  data$hp = hp
+  submodelName = paste0(modelName, hp)
+  sbc_res_norm_var <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
+  uniformity.sbc(sbc_res_norm_var, submodelName)
+  plot.sbc(sbc_res_norm_var, submodelName)
+}
+```
+
+## 2. negative binomial with poisson - overdispersed poisson
+```{r}
+data = list()
+modelName <- "nb_pois"
+file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
+mod <- cmdstan_model(file)
+N = 100 #(bins = 20)*N # num of sim and fit
+M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
+delivDir <- set_Model_Dir(modelName)$delivDir
+for (hp in c(1, 10, 100)){
+  data$hp = hp
+  submodelName = paste0(modelName, hp)
+  sbc_res_nb_pois <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
+  uniformity.sbc(sbc_res_nb_pois, submodelName)
+  plot.sbc(sbc_res_nb_pois, submodelName)
+}
+```
+
+## 3.t with normal - degree of freedom
+```{r}
+data = list()
+modelName <- "t_norm_nu_mu0"
+file <- file.path(modelDir, modelName, paste0(modelName, ".stan"))
+mod <- cmdstan_model(file)
+N = 100 #(bins = 20)*N # num of sim and fit
+M = 297 # 897 (6n -3) # num of post. draw - related to iter_sampling - not used currently
+delivDir <- set_Model_Dir(modelName)$delivDir
+for (hp_nu in 1:5){
+  data$hp_nu = hp_nu
+  submodelName = paste0(modelName, hp_nu)
+  sbc_res_t_normal_sd <- sbc(mod, submodelName, data = data, N = N, M = M, save_progress = delivDir)
+  uniformity.sbc(sbc_res_t_normal_sd, submodelName)
+  plot.sbc(sbc_res_t_normal_sd, submodelName)
+}
+```
+
