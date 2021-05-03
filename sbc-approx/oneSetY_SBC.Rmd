@@ -1,0 +1,134 @@
+---
+title: "oneSetY_SBC"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+library(SBC)
+plot_sbc <- function(name, ranks){
+  sbc_hist <- hist(ranks, breaks=seq(0, M + 1, 1) - 0.5, plot=FALSE)
+  plot(sbc_hist, main= name, xlab="Prior Rank", yaxt='n', ylab="")
+  low <- qbinom(0.005, N, 1 / (M + 1))
+  mid <- qbinom(0.5, N, 1 / (M + 1))
+  high <- qbinom(0.995, N, 1 / (M + 1))
+  bar_x <- c(-1, M + 1, M + 0.5, M + 1, -1, -0.5, -1)
+  bar_y <- c(high, high, mid, low, low, mid, high)
+  polygon(bar_x, bar_y, col=c("#DDDDDD"), border=NA)
+  segments(x0=-0.5, x1=(M + 0.5), y0=mid, y1=mid, col=c("#999999"), lwd=2)
+  plot(sbc_hist, col=c_dark, border=c_dark_highlight, add=T)
+}
+N = 10000
+M = 25
+```
+
+## Incorrect SBC
+The point is not to create a joint data space from which the posteriors will be sampled from. Think of this as the ability to retrive the one prior sample you started with from the resulting posteriors. I have experimented with the beta_bernoulli rstan example. 
+
+```{r cars}
+# Correct normal_normal
+name <- "Correct normal_normal"
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  theta <- rnorm(1, m, s)
+  y <- rnorm(1, theta, sigma)
+  post_m <- (y * s2 + m * sigma2) / (s2 + sigma2)
+  post_s <- sqrt( s2 * sigma2 / (s2 + sigma2) )
+  post_theta <- rnorm(M, post_m, post_s)
+  ranks[n] <- sum(post_theta < theta)
+}
+plot_sbc(name, ranks)
+print_summary(matrix(ranks))
+# Inorrect normal_normal
+name <- "Inorrect normal_normal"
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  theta <- rnorm(1, m, s)
+  y <- rnorm(M, theta, sigma)
+  post_m <- (y * s2 + m * sigma2) / (s2 + sigma2)
+  post_s <- sqrt( s2 * sigma2 / (s2 + sigma2) )
+  post_theta <- rnorm(M, post_m, post_s)
+  ranks[n] <- sum(post_theta < theta)
+}
+plot_sbc(name, ranks)
+print_summary(matrix(ranks))
+# Improve inorrect normal_normal
+name <- "Improve Inorrect normal_normal"
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  theta <- rnorm(1, m, s)
+  y <- rnorm(M, theta, sigma)
+  post_m <- (mean(y) * s2 + m * sigma2) / (s2 + sigma2)
+  post_s <- sqrt(s2 * sigma2 / (s2 + sigma2) )
+  post_theta <- rnorm(M, post_m, post_s)
+  ranks[n] <- sum(post_theta < theta)
+}
+plot_sbc(name, ranks)
+print_summary(matrix(ranks))
+#rank <- calculate_rank(p, post_p)
+#plot_ecdf(ranks, "p")
+```
+
+```{r, echo=FALSE}
+# Correct beta_bern
+name <- "Correct beta_bern"
+a = b = 1
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  p <- rbeta(1, a, b)
+  y <- rbernoulli(1, p)
+  post_a <- a + sum(y)
+  post_b <- b + 1 - sum(y)
+  post_p <- rbeta(M, post_a, post_b)
+  ranks[n] <- sum(post_p < p)
+}
+plot_sbc(name, ranks)
+print_summary(matrix(ranks))
+
+name <- "Incorrect beta_bern"
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  p <- rbeta(1, a, b)
+  y <- rbernoulli(M, p)
+  post_a <- a + sum(y)
+  post_b <- b + M - sum(y)
+  post_p <- rbeta(M, post_a, post_b)
+  ranks[n] <- sum(post_p < p)
+}
+plot_sbc(name, ranks)
+print_summary(matrix(ranks))
+```
+
+
+
+```{r}
+# Correct beta_binom
+name <- "Correct beta_binom"
+NB <- 10
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  p <- rbeta(1, a, b)
+  y <- rbinom(1, NB, p)
+  post_a <- a + sum(y)
+  post_b <- b + NB - sum(y)
+  post_p <- rbeta(M, post_a, post_b)
+  ranks[n] <- sum(post_p < p)
+}
+plot_sbc(name, ranks)
+
+# Incorrect beta_binom
+name <- "Incorrect beta_binom"
+ranks <- rep(0, 100)
+for (n in 1:N) {
+  p <- rbeta(1, a, b)
+  y <- rbinom(M, NB, p)
+  post_a <- a + sum(y)
+  post_b <- b + NB * M - sum(y)
+  post_p <- rbeta(M, post_a, post_b)
+  ranks[n] <- sum(post_p < p)
+}
+plot_sbc(name, ranks)
+```
+
+
