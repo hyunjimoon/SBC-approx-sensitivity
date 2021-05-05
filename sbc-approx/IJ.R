@@ -43,145 +43,19 @@ sbc_hist <- hist(ranks,  breaks=seq(0, L + 1, 1) - 0.5,  plot=FALSE)
 plot(sbc_hist, main="SBC (Correct)", xlab="Prior Rank", yaxt='n', ylab="")
 dev.off() 
 
-# BS approx, rank compare
-approxAlg = "BS1"
-N_theta = 10
-N_y = 25
-N_data = 30 # ok for N_data !=1 ?
-approxName  = paste0(approxAlg, "_", N_theta,"_", N_y, "_",N_data)
-ranks <- rep(NA, N_theta)
-post_lambda <- matrix(, nrow = N_y, ncol = N_theta)
-for (n in 1:N_theta) {
-  lambda <- rgamma(1, shape, rate)
-  y <- rpois(N_data, lambda)
-  for (m in 1:N_y){ # N_y = L
-    y_BS <- sample(y, replace = T)
-    sf_BS <- s_fit(modelName, approxName, data = list(N =N_data, y = as.array(y_BS)), S = n*N_y + m) 
-    seq = floor(seq(1,500, length.out  = L))
-    post_lambda_s <- as_draws_df(sf_BS$draws(variables ="lambda")) %>% slice(seq) %>% pull(lambda)
-    post_lambda[m, n] <- mean(post_lambda_s)
-  }
-  ranks[n] <- sum(post_lambda[,n] < lambda)
-}                                                                                                                                                                                   
-sbc_hist <- hist(ranks,breaks=seq(0, L + 1, 1) - 0.5, plot=FALSE) 
-title = paste0(approxName, " for theta, y, data sim#")
-pdf(file = file.path(scriptDir, "deliv", modelName,"plot",  paste0(approxName, ".pdf")), width = 5, height = 5) 
-plot(sbc_hist, main= title, xlab="Prior Rank", yaxt='n', ylab="")
-dev.off() 
-
-# BS approx, sample distribution compare
-approxAlg = "BS2"
-N_theta = 5
-N_y = 50
-N_data = 30
-approxName  = paste0(approxAlg, "_", N_theta,"_", N_y, "_",N_data)
-ranks <- rep(0, 100)
-post_lambda_lst <- rep(NA, N_y)
-for (n in 1:N_theta) {
-  rank = 0
-  lambda <- rgamma(1, shape, rate)
-  y <- rpois(N_data, lambda)
-  for (m in 1:N_y){ 
-    y_BS <- sample(y, replace = T)
-    sf_BS <- s_fit(modelName, approxName, data = list(N =N_data, y = as.array(y_BS)), S = m)  
-    post_lambda <- as_draws_df(sf_BS$draws(variables ="lambda"))$lambda 
-    post_lambda_lst[m] <- post_lambda
-  }
-}
-sbc_hist <- hist(ranks,  plot=FALSE)
-title = paste0(approxName, " for theta, y, data sim#")
-pdf(file = file.path(scriptDir, "deliv", modelName,"plot", paste0(approxName, ".pdf")), width = 5, height = 5) 
-hist(post_lambda_lst, main= title, xlab="Data avg. prior", yaxt='n', ylab="")
-dev.off() 
-
-# BS approx, sample distribution compare2
-approxAlg = "BS3"
-N_theta = 5
-N_y = 50
-N_data = 30
-approxName  = paste0(approxAlg, "_", N_theta,"_", N_y, "_",N_data)
-ranks <- rep(0, 100)
-post_lambda_lst <- rep(NA, N_y)
-for (n in 1:N_theta) {
-  rank = 0
-  lambda <- rgamma(1, shape, rate)
-  y <- rpois(N_data, lambda)
-  for (m in 1:N_y){ 
-    y_BS <- sample(y, replace = T)
-    sf_BS <- s_fit(modelName, approxName, data = list(N =N_data, y = as.array(y_BS)), S = m)  
-    post_lambda <- as_draws_df(sf_BS$draws(variables ="lambda"))$lambda 
-    post_lambda_lst[m] <- mean(post_lambda)
-  }
-}
-sbc_hist <- hist(ranks,  plot=FALSE)
-title = paste0(approxName, " for theta, y, data sim#")
-pdf(file = file.path(scriptDir, "deliv", modelName,"plot", paste0(approxName, ".pdf")), width = 5, height = 5) 
-hist(post_lambda_lst, main= title, xlab="Data avg. prior", yaxt='n', ylab="")
-dev.off()
-
-
-# IJ approx N_theta for loop
-approxAlg = "IJ1.1"
-N_theta = 10
-N_data = 30
-approxName  = paste0(approxAlg, "_", N_theta, "_",N_data)
-ranks <- rep(NA, N_theta)
-for (n in 1:N_theta) {
-  lambda <- rgamma(1, shape, rate)
-  y <- rpois(N_data, lambda) 
-  y_BS <- sample(y, replace=TRUE, size=N_data)
-  sf_IJ <- s_fit(modelName, approxName, data = list(N =N_data, y = y_BS), S = n) # "IJ var captures BS var better"
-  loglik_draws <-  select(as_draws_df(sf_IJ$draws(variables = "log_lik")), contains("log_lik"))
-  param_draws <- as_draws_df(sf_IJ$draws(variables ="lambda"))$lambda 
-  infl_draws_mat <- N_data * cov(loglik_draws, param_draws) #infl_draws_mat scale is  much smaller comparable to lambda
-  post_lambda <- infl_draws_mat[,1]
-  ranks[n] <- sum(post_lambda< lambda)
-}   
-pdf(file = file.path(scriptDir, "deliv", modelName, "plot", paste0(approxName, ".pdf")), width = 5, height = 5) 
-sbc_hist <- hist(c(ranks), plot=FALSE) # breaks=seq(0, L + 1, 1) - 0.5,
-title = paste0(approxName, " for theta, data sim#")
-plot(sbc_hist, main= title, xlab="Prior Rank", yaxt='n', ylab="")
-dev.off() 
-
-# IJ approx in N_theta and N_y for loop
-approxAlg = "IJ1_2"
-N_theta = 5
-N_y = 25
-N_data = 30
-approxName  = paste0(approxAlg, "_", N_theta,"_", N_y, "_",N_data)
-ranks <- rep(NA, N_theta)
-for (n in 1:N_theta) {
-  lambda <- rgamma(1, shape, rate)
-  y <- rpois(N_data, lambda) 
-  for (m in 1:N_y){
-    y_BS <- sample(y, replace=TRUE, size=N_data)
-    sf_IJ <- s_fit(modelName, approxName, data = list(N =N_data, y = y_BS), S = n*N_y + m) # "IJ var captures BS var"
-    loglik_draws <-  select(as_draws_df(sf_IJ$draws(variables = "log_lik")), contains("log_lik"))
-    param_draws <- as_draws_df(sf_IJ$draws(variables ="lambda"))$lambda
-    infl_draws_mat <- N_data * cov(loglik_draws, param_draws) #infl_draws_mat scale is  much smaller comparable to lambda
-    post_lambda <- infl_draws_mat[,1]
-  }
-}   
-pdf(file = file.path(scriptDir, "deliv", modelName, "plot", paste0(approxName, ".pdf")), width = 5, height = 5) 
-sbc_hist <- hist(c(ranks), plot=FALSE) # breaks=seq(0, L + 1, 1) - 0.5,
-title = paste0(approxName, " for theta, y, data sim#")
-plot(sbc_hist, main= title, xlab="Prior Rank", yaxt='n', ylab="")
-dev.off() 
 
 # IJ assume known mean, estimate var with ij_cov 
-approxAlg = "IJ2"
-N_theta = 30
-N_y = 20
-N_data = 30 # ok for N_data !=1 ?
-approxName  = paste0(approxAlg, "_", N_theta,"_", N_y, "_",N_data)
-ranks <- matrix(, nrow = N_y, ncol = N_theta)
+approxAlg = "IJ"
 
-for (n in 1:N_theta) {
+approxName  = paste0(approxAlg, "_", N,"_", M, "_",N_data)
+ranks <- matrix(, nrow = M, ncol = N)
+
+for (n in 1:N) {
   lambda <- rgamma(1, shape, rate)
-  y <- rpois(N_data, lambda) # original was single sampling
-  for (m in 1:N_y){
+  y <- rpois(N_data, lambda) 
+  for (m in 1:M){
     y_BS <- sample(y, replace=TRUE, size=N_data)
-    sf_IJ <- s_fit(modelName, approxName, data = list(N =N_data, y = y_BS), S = n*N_y + m) # IJ var captures BS var well.
+    sf_IJ <- s_fit(modelName, approxName, data = list(N =N_data, y = y_BS), S = n*M + m) # IJ var captures BS var well.
     loglik_draws <- as_draws_df(sf_IJ$draws(variables = "log_lik"))%>%select(1:N_data)
     param_draws <- as_draws_df(sf_IJ$draws(variables ="lambda"))$lambda
     infl_draws_mat <- N_data * cov(loglik_draws, param_draws)
