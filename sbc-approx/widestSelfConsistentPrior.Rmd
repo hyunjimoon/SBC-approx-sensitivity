@@ -55,9 +55,6 @@ ws <- function(pri, post,  minBin = -1, maxBin = 1, numBins = 40){
   pribin = discretize(pri, numBins, r=c(minBin, maxBin)) / length(pri)
   postbin = discretize(post, numBins, r=c(minBin, maxBin))/ length(post)
   tb <- tibble(pribin, postbin)
-  df <- melt(df, id.vars = 'iter')
-  ggplot(df, aes(x = iter, y = value,  color = variable) ) +
-  geom_point() + ggtitle(sprintf("priorSd: %s, N: %s, M: %s ", s0, N, M))
   bin_diff_abs <- Vectorize(function(i)  abs(pribin[i] - postbin[i]))
   wasserstein <- integrate(bin_diff_abs,1,numBins, rel.tol=.Machine$double.eps^.05)$value
   return (wasserstein - entropy::entropy(postbin))
@@ -115,8 +112,6 @@ for (e in 1:E){
     }
     post_theta <- post_summ(post, sumtype = "Identity")
     wsc <- ws(theta, post_theta)
-    print(paste0("wsh:", wsh))
-    print(paste0("wsc:", wsc))
     if(wsc < wsh){wsh <- wsc}
     m  <- mean(post_theta)
     s  <- sd(post_theta)
@@ -163,8 +158,6 @@ for (e in 1:E){
     }
     post_theta <- post_summ(post, sumtype = "Identity")
     wsc <- ws(theta, post_theta, minBin = -100, maxBin = 100, numBins = 100)
-    print(paste0("wsh:", wsh))
-    print(paste0("wsc:", wsc))
     if(wsc < wsh){wsh <- wsc}
     m  <- mean(post_theta)
     s  <- sd(post_theta)
@@ -220,8 +213,6 @@ for (e in 1:E){
     post_theta <- post_summ(post, sumtype = "resample")
     wsc <- ws(theta, post_theta)
     if(wsc < wsh){wsh <- wsc}
-    print(paste0("wsh:", wsh))
-    print(paste0("wsc:", wsc))
     m  <- mean(post_theta)
     s  <- sd(post_theta)
     s2 <- s * s
