@@ -1,0 +1,233 @@
+---
+title: "SelfConsistentPrior"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(cmdstanr)
+library(dplyr)
+library(tidyverse)
+library(reshape)
+library(parallel)
+library(SBC)
+library(pracma)
+library(entropy)
+#devtools::install_github("rmcelreath/rethinking",ref="Experimental")
+library(rethinking)
+set.seed(1954)
+.libPaths("~/Rlib")
+options(mc.cores = parallel::detectCores())
+set_get_Dir <- function(modelName){
+  scriptDir <- getwd()
+  modDir <- file.path(scriptDir, "models")
+  dataDir <- file.path(scriptDir, "data")
+  delivDir <- file.path(scriptDir, "deliv", modelName)
+  dir.create(delivDir)
+  file <- file.path(modDir, modelName, paste0(modelName, ".stan"))
+  mod <- cmdstan_model(file)
+  return(list(data = data, mod = mod, modDir = modDir, file = file, delivDir = delivDir)) 
+}
+initDf <-function(L, summary){
+  if(summary == "ms"){
+     df <- data.frame(iter = 1:L,
+                 mean = rep(NA,L),
+                 sd = rep(NA,L)
+    )
+  }else if (summary == "q"){
+     df <- data.frame(iter = 1:L,
+                   q1 = rep(NA,L),
+                   q3 = rep(NA,L)
+    )
+  }
+  df
+}
+
+post_summ <- function(post, sumtype){
+  if (sumtype == "Identity"){
+      return (c(post))
+  } else if(sumtype == "resample"){
+    return (sample(post, N, replace=TRUE)) 
+  }
+}
+
+ws <- function(pri, post,  minBin = -1, maxBin = 1, numBins = 40){
+  #min_s = min(c(pri,post)) reltarive range does not give globale entropy
+  pribin = discretize(pri, numBins, r=c(minBin, maxBin)) / length(pri)
+  postbin = discretize(post, numBins, r=c(minBin, maxBin))/ length(post)
+  tb <- tibble(pribin, postbin)
+  bin_diff_abs <- Vectorize(function(i)  abs(pribin[i] - postbin[i]))
+  wasserstein <- integrate(bin_diff_abs,1,numBins, rel.tol=.Machine$double.eps^.05)$value
+  return (wasserstein - entropy::entropy(postbin))
+}
+
+#TODO
+# ws_update <- function(){
+#   
+#   dummy <- function(x) {
+#   z <- x[1]; y <- x[2]
+#   rez <- (z^2)*(y^3)
+#   rez # (2*z*y^3, z^2*3*y^2) returned for 
+#   }
+#   grad(dummy, c(1,2))
+# }
+```
+
+# Normal-Normal conjugate, unkown mean (theta) and known sd(sigma)
+
+$$
+\theta \sim N(\mu, s^2)\\
+y \sim N(\theta, \sigma^2)\\
+\theta|y \sim N(\frac{s^2}{s^2 +\sigma^2} *\bar{y}+ \frac{\sigma^2}{s^2 +\sigma^2} * \mu, \frac{s^2 * \sigma^2}{s^2 +  \sigma^2})\\
+\sigma = 1, s = 0.1 \;\text{or} \; 1000
+$$
+
+
+# 1. The effect of parameter scale: s .1, 1000
+Prevent converging to the point mass; entropy term is needed.
+
+## 1-1. Normal prior (N) + Normal data simulator (N) + conjugate perfect posterior simulator (NM)/ No summary
+```{R}
+I <- 2000 # Number of iterations
+N <-  1000# Number of prior samples (= total data samples, one dataset for each prior)
+M <- 25 # Number of posterior samples
+E <- 3 # Number of experiment replication
+df <- initDf(E * I, summary = "q")
+wsh = 0
+for (e in 1:E){
+  m <- 0
+  s0 <-.1
+  s <- s0
+  s2 <- s * s
+  for (i in 1:I) {
+    # prior simulator
+    theta <- rnorm(N, m, s) # N prior samples, laplace approximation of posterior samples
+    # data simulator
+    y <- rnorm(N, theta, sigma) # one data sample from each prior
+    # posterior simulator
+    post_m <- (y * s2 + m * sigma2) / (s2 + sigma2) # M posterior samples from each data
+    post_s <- sqrt( s2 * sigma2 / (s2 + sigma2) )
+    post <- matrix(nrow = N, ncol = M)
+    for (n in 1:N){
+      post[n,]<- rnorm(M, post_m[n], post_s)
+    }
+    post_theta <- post_summ(post, sumtype = "Identity")
+    wsc <- ws(theta, post_theta)
+    if(wsc < wsh){wsh <- wsc}
+    m  <- mean(post_theta)
+    s  <- sd(post_theta)
+    s2 <- s * s
+    q <-  quantile(post_theta, c(.25,.75))
+    df$q1[(e-1)*I + i] <-q["25%"]
+    df$q3[(e-1)*I + i] <- q["75%"]
+    df$ws[(e-1)*I + i] <- wsc
+    df$e[(e-1)*I + i] <- e
+    df$i[(e-1)*I + i] <- i
+  }
+}
+idx <- c('iter','e', 'i')
+df1 <- melt(df, id.vars = idx) #TODO log scale
+ggplot(df1, aes(x = i, y = value,  color = variable) ) +
+geom_point() + ggtitle(sprintf("priorSd: %s, N: %s, M: %s ", s0, N, M)) + 
+facet_wrap(~e)
+```
+
+## 1-2. Normal prior (N) + Normal data simulator (N) + conjugate perfect posterior simulator (NM)/ No summary
+```{R}
+I <- 2000 # Number of iterations
+N <-  1000# Number of prior samples (= total data samples, one dataset for each prior)
+M <- 25 # Number of posterior samples
+E <- 3 # Number of experiment replication
+df <- initDf(E * I, summary = "q")
+wsh = 0
+for (e in 1:E){
+  m <- 0
+  s0 <-1000
+  s <- s0
+  s2 <- s * s
+  for (i in 1:I) {
+    # prior simulator
+    theta <- rnorm(N, m, s) # N prior samples, laplace approximation of posterior samples
+    # data simulator
+    y <- rnorm(N, theta, sigma) # one data sample from each prior
+    # posterior simulator
+    post_m <- (y * s2 + m * sigma2) / (s2 + sigma2) # M posterior samples from each data
+    post_s <- sqrt( s2 * sigma2 / (s2 + sigma2) )
+    post <- matrix(nrow = N, ncol = M)
+    for (n in 1:N){
+      post[n,]<- rnorm(M, post_m[n], post_s)
+    }
+    post_theta <- post_summ(post, sumtype = "Identity")
+    wsc <- ws(theta, post_theta, minBin = -100, maxBin = 100, numBins = 100)
+    if(wsc < wsh){wsh <- wsc}
+    m  <- mean(post_theta)
+    s  <- sd(post_theta)
+    s2 <- s * s
+    q <-  quantile(post_theta, c(.25,.75))
+    df$q1[(e-1)*I + i] <-q["25%"]
+    df$q3[(e-1)*I + i] <- q["75%"]
+    df$ws[(e-1)*I + i] <- wsc
+    df$e[(e-1)*I + i] <- e
+    df$i[(e-1)*I + i] <- i
+  }
+}
+idx <- c('iter','e', 'i')
+df1 <- melt(df, id.vars = idx) #TODO log scale
+ggplot(df1, aes(x = i, y = value,  color = variable) ) +
+geom_point() + ggtitle(sprintf("priorSd: %s, N: %s, M: %s ", s0, N, M)) + 
+facet_wrap(~e)
+```
+
+- Compared to s = .1 where the breadth of distributions were maintained, larger s tend to converge to a point mass, which is what we wish to prevent, but to a point mass which has limited use as a self-consistent measure.
+- Also, this point mass is not unique as repeated experiment converged to different point mass. Another force that pushes sd away from 0 is needed; entropy.
+- Smaller N and higher s (increased data dependence), converge to a point mass faster.
+- Hopefully, the designed objective term WS increases and therefore the penalty term works well.
+
+s = .1, N = 1000 (sometimes 10000) will be used for the following experiment.
+
+#2. The effect of summarizing posterior
+
+## 2-1. Imperfect posterior sampler: 1.Normal prior (N) + 2.Normal data simulator (N) + 3.[conjugate perfect posterior simulator (NM) + summarized posterior (N from NM)]
+```{r}
+I <- 2000 # Number of iterations
+N <-  1000# Number of prior samples (= total data samples, one dataset for each prior)
+M <- 25 # Number of posterior samples
+E <- 3 # Number of experiment replication
+df <- initDf(E * I, summary = "q")
+for (e in 1:E){
+  m <- 0
+  s0 <-.1
+  s <- s0
+  s2 <- s * s
+  for (i in 1:I) {
+    # prior simulator
+    theta <- rnorm(N, m, s) # N prior samples, laplace approximation of posterior samples
+    # data simulator
+    y <- rnorm(N, theta, sigma) # one data sample from each prior
+    # posterior simulator
+    post_m <- (y * s2 + m * sigma2) / (s2 + sigma2) # M posterior samples from each data
+    post_s <- sqrt( s2 * sigma2 / (s2 + sigma2) )
+    post <- matrix(nrow = N, ncol = M)
+    for (n in 1:N){
+      post[n,]<- rnorm(M, post_m[n], post_s)
+    }
+    post_theta <- post_summ(post, sumtype = "resample")
+    wsc <- ws(theta, post_theta)
+    if(wsc < wsh){wsh <- wsc}
+    m  <- mean(post_theta)
+    s  <- sd(post_theta)
+    s2 <- s * s
+    q <-  quantile(post_theta, c(.25,.75))
+    df$q1[(e-1)*I + i] <-q["25%"]
+    df$q3[(e-1)*I + i] <- q["75%"]
+    df$ws[(e-1)*I + i] <- wsc
+    df$e[(e-1)*I + i] <- e
+    df$i[(e-1)*I + i] <- i
+  }
+}
+idx <- c('iter','e', 'i')
+df1 <- melt(df, id.vars = idx)
+ggplot(df1, aes(x = i, y = value,  color = variable) ) +
+geom_point() + ggtitle(sprintf("priorSd: %s, N: %s, M: %s ", s0, N, M)) + 
+facet_wrap(~e)
+```
+Resampling has the effect of point mass convergence.
