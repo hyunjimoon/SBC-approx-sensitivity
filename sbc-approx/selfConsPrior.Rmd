@@ -40,8 +40,56 @@ y \sim N(\theta, \sigma^2)\\
 \theta|y \sim N(\frac{s^2}{s^2 +\sigma^2} *\bar{y}+ \frac{\sigma^2}{s^2 +\sigma^2} * \mu, \frac{s^2 * \sigma^2}{s^2 +  \sigma^2})\\
 \sigma = 1, s = 0.1 \;\text{or} \; 5
 $$
+# 1. Designing iteration
+```{R}
+source("tools/selfCalib.R")
+modelName = "simple_normal"
+modDir <- set_get_Dir(modelName)$modDir
+delivDir <- set_get_Dir(modelName)$delivDir
+file <- set_get_Dir(modelName)$file
+simple_normal = cmdstanr::cmdstan_model(file)
+generator <- function(){  
+    function(){
+    theta <- rnorm(1, 0, 1)
+    list(
+      generated = rnorm(8, theta, 1),
+      parameters = list(
+        theta = theta
+      )
+    )
+  }
+}
+D <- 8
+y <- rep(0, D) # placeholder
+data = list("D"= D, "y"= y, "theta_loc"= 0, "theta_scale"= 1)
+nChains <- 4
+parallel_chains <- min(nChains, detectCores())
+N = 20 #200
+M = 5 # 40
+workflow <- SBC::SBCWorkflow$new(simple_normal, generator())
+workflow$simulate(N) 
+workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
+prior <- workflow$prior_samples
+post <- workflow$posterior_samples
+workflow$calculate_rank()
 
+#target calibration
+pars<-  "theta" #names(prior)[c(1)] 
+evolve_df <- initDf(1, summary = "pars")
+#sc_workflow <- SBCWorkflow$new(simple_normal, generator())
+sc_prior <-  selfCalib(stan_model = simple_normal, prior, pars, data, N, M, cnt = 1, evolve_df, delivDir, is_param = FALSE)
+# test self-consistency fo sc_prior
+sc_workflow$simulate(n_sbc_iterations = N, custom_prior = sc_prior)
+#clamped stan could be applied for inference
+sc_workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
+sc_ranks <- sc_workflow$calculate_rank()
+plot_ecdf(as_draws_matrix(sc_ranks), "mu")
+plot_hist(as_draws_matrix(sc_ranks), "mu", bins = 10)
+print_summary(as_draws_matrix(sc_ranks), "mu", bins = 10)
+# parameteric generator and stan prior
+par <- c("theta")
 
+```
 # 1. The effect of parameter scale: s 5, .1, 100
 Prevent converging to the point mass; entropy term is needed.
 ## 1-1. Normal prior (N) + Normal data simulator (N) + conjugate perfect posterior simulator (NM)/ Plot mean, sd
@@ -556,20 +604,7 @@ plot_ecdf(as_draws_matrix(ranks), "mu")
 plot_hist(as_draws_matrix(ranks), "mu", bins = 10)
 print_summary(as_draws_matrix(ranks), "mu", bins = 10)
 
-#target calibration
-pars<-  "mu" #names(prior)[c(1)] 
-evolve_df <- initDf(1, summary = "pars")
-sc_workflow <- SBCWorkflow$new(ncp_model, generator())
-sc_prior <- selfCalib(sc_workflow, prior, data, pars, N, M, cnt = 1, evolve_df, delivDir)[1]
 
-# test self-consistency fo sc_prior
-sc_workflow$simulate(n_sbc_iterations = N, custom_prior = sc_prior)
-#clamped stan could be applied for inference
-sc_workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
-sc_ranks <- sc_workflow$calculate_rank()
-plot_ecdf(as_draws_matrix(sc_ranks), "mu")
-plot_hist(as_draws_matrix(sc_ranks), "mu", bins = 10)
-print_summary(as_draws_matrix(sc_ranks), "mu", bins = 10)
 # expected to be uniform
 ```
 

@@ -213,3 +213,27 @@ runModel <- function(model, data, iter, warmup, thin, init, seed, chain = 1,
                " refresh=", refresh,
                sep = ""))
 }
+
+pp_overlay_rvar <- function(prior, post, par, cnt = 1){
+  prior_1d <- as_draws_df(prior)[[par]]
+  N <- length(prior_1d)
+  ppc_dens_overlay(prior_1d, matrix(as_draws_df(post)[[par]], ncol=N))
+  #ggsave(file =  file.path(delivDir, paste0(paste0(cnt, "_"), "pp_overlay.png", sep = "")), width = 5, height = 5)
+}
+csv_store <- function(sample, delivDir, cnt, type= "each"){
+  if(type == "each"){
+    write.csv(as_draws_df(sample), file =  file.path(delivDir, paste0(paste0(cnt, "_"), "each.csv", sep = "")))
+  }else{
+    write.csv(apply(sample,2,as.character), file =  file.path(delivDir, paste0(paste0(cnt, "_"), "evolve.csv", sep = "")))
+  }
+}
+intv_plot_save <- function(evolve_df){
+  intv <- subset_draws(mutate_variables(as_draws_df(lapply(evolve_df, as.numeric)), low1sd = (median + mad), up1sd = (median - mad)) , c("iter", "low1sd", "up1sd"))
+  intv$iter <- as.numeric(rownames(evolve_df))
+  intv <- reshape2::melt(intv, id.vars = "iter")
+  intv <- filter(intv, variable == "low1sd" | variable == "up1sd")
+  ggplot(intv, aes(x = as.numeric(iter), y = value,  color = variable) ) +
+    geom_line() + ggtitle(sprintf("target par: %s, N: %s, M: %s ", pars, N, M))
+  ggsave(file = file.path(delivDir, paste0(paste0(modelName, "_"), "evolove.png")), width = 5, height = 5)
+}
+
