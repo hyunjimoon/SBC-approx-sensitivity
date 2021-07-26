@@ -67,7 +67,6 @@ post <- workflow$posterior_samples
 workflow$calculate_rank()
 plot_ecdf_diff(workflow, var="theta")
 
-plot_diag(workflow, par, bins = 20, delivDir, is_bf = "bfCalib")
 #target calibration
 par<-  "theta" #names(prior)[c(1)] 
 evolve_df <- initDf(1, summary = "pars")
