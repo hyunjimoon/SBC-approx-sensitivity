@@ -32,20 +32,22 @@ selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, deliv
       }
     }
     workflow <- SBCWorkflow$new(stan_model, generator_np())
-    workflow$simulate(n_sbc_iterations = N, param = is_param, as_draws_df(prior)[[pars]]) #custome_prior
-    workflow$fit_model(sample_iterations = M, warmup_iterations = M, next_data)
+    # input samples of multiple parameter
+    # custom_prior: https://github.com/hyunjimoon/SBC/blob/927da3f9bc87aca19a34f4dd2061f40eae3176ea/R/util.R#L83
+    workflow$simulate(n_sbc_iterations = N, param = is_param, as_draws_df(prior)[[pars]]) #custome_prior draws_of(prior[[par]])
+    workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
     next_prior <- post_summ(workflow, pars, sumtype = "filtering")
   }
   t_prior <- workflow$prior_samples[pars]
   t_post <- workflow$posterior_samples[pars]
-  overlay_rvar_pri_post(t_prior, t_post, pars, cnt)
+  pp_overlay_rvar(t_prior, t_post, pars, cnt)
   if(cnt == 1){
     evolve_df[row(evolve_df)==cnt] <-summarise_draws(t_prior, median, mad)[2:3]
   }else{
     d <- summarise_draws(t_prior, median, mad)[2:3]
     evolve_df <-rbind(evolve_df, as.numeric(d))
   }
-  if (iter_stop(t_prior, t_post)){
+  if (iter_stop(t_prior, t_post, bins)){
     csv_store(t_prior, delivDir, cnt)
     csv_store(evolve_df, delivDir, cnt,  type = "evolve")
     intv_plot_save(evolve_df)
@@ -58,7 +60,7 @@ selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, deliv
   }
 }
 
-iter_stop <- function(prior, post, pars){
+iter_stop <- function(prior, post, bins = 30){
   post_r_loc <- lapply(post, mean)
   post_r_scale <- lapply(post, sd)
   r_loc <- list()
@@ -67,31 +69,30 @@ iter_stop <- function(prior, post, pars){
     r_loc <- append(r_loc, E(prior[[par]]) / post_r_loc[[par]])
     r_scale <- append(r_scale, sd(prior[[par]]) / post_r_scale[[par]])
   }
-  #print(paste0(paste0("r_loc ", r_loc, paste0(" r_scale ", r_scale))))
-  # NMP_G  %>% group_by(par, prior) %>% summarise("post_median" = median(value)) %>%
-  #   ggplot(aes(x = prior, y = post_median, colour = par))  + geom_point() + xlim(min(prior_theta), max(prior_theta)) + ylim(min(prior_theta), max(prior_theta)) + coord_equal()
-  # ggsave(file = file.path(delivDir, paste0(paste0(paste0(modelName, "_"), ".png"))), width = 5, height = 5)
+  #dist_summary(prior, post, par, bins)$Minkowski_2 < 100
   return (all(r_loc > 0.9 && r_loc < 1.1 && r_scale > 0.9 && r_scale < 1.1 ))
 }
 
 # summarize NM posterior samples to N for each parameter
 post_summ <- function(workflow, pars, sumtype){
-  prior_rv <- workflow$prior_samples
-  prior <- as_draws_df(workflow$prior_samples[[pars]])$x
-  post <- as_draws_df(workflow$posterior_samples[[pars]])$x
+  prior <- subset_draws(workflow$prior_samples, variables = pars)
+  post <- subset_draws(workflow$posterior_samples, variables = pars)
+  # need to work for multiple pars
   if (sumtype == "filtering"){
-    if(length(prior) < 10){
+    if(length(draws_of(prior[[par]])) < 10){
       return (workflow$posterior_samples[names(prior_rv)])
     }else{
-      q_prior <-as_draws_df(workflow$prior_samples[[pars]]) # to borrow the frame
-      q_prior$x  <- sort(prior)
-      post <- as_draws_df(workflow$posterior_samples[[pars]])$x
-      prior_rv[pars] <- resample_draws(as_draws_df(workflow$prior_samples), tabulate(ecdf(prior)(post) * N, nbins = N))[[par]]
-      return (prior_rv)
+      for (par in pars){
+        prior_par <- as_draws_df(prior)[[pars]] #draws_of(prior[[par]])
+        post_par <- as_draws_df(post)[[pars]] #draws_of(post[[par]])
+        q_prior <- as_draws_df(workflow$prior_samples) # to borrow the frame
+        q_prior[[par]]  <- sort(prior_par)
+        ar <- as_draws_array(resample_draws(q_prior, tabulate(ecdf(prior_par)(post_par) * N, nbins = length(prior_par))))
+        return (as_draws_rvars(aperm(ar, c(2,1,3))))
+      }
     }
-  } else if(sumtype == "sample"){ # only choose the first
+  }else if(sumtype == "sample"){ # only choose the first
     return (subset_draws(post,variable = names(prior), iteration = 1))
-  } else if(sumtype == "median"){ # median of M from each N prior
   }
 }
 

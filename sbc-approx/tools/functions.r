@@ -135,7 +135,7 @@ mbmaPpcPlot <- function(data, x = "x", treatment = "treatment", type = "type", x
   nPerTreat <- sapply(treats, function(treat, data)
                       sum(data$treatment == treat),
                       data = xobs)
-  
+
   ## Calculate number of equally spaced positions on the y axis
   ny <- sum(nPerTreat) + nTreat - 1
   dy <- 1 / (ny - 1)
@@ -182,7 +182,7 @@ rbeta2Scaled <- function(n, mean, sd, lower, upper){
     if(m < 0 | m > 1) stop("ERROR in rbeta2Scaled: m < 0 | m > 1")
     rbeta2(n, m, s) * dx + lower
 }
-    
+
 compileModel <- function(model, stanDir = stanDir){
     modelName <- basename(model)
     dir.create(model)
@@ -218,17 +218,19 @@ pp_overlay_rvar <- function(prior, post, par, cnt = 1){
   prior_1d <- as_draws_df(prior)[[par]]
   N <- length(prior_1d)
   ppc_dens_overlay(prior_1d, matrix(as_draws_df(post)[[par]], ncol=N))
-  #ggsave(file =  file.path(delivDir, paste0(paste0(cnt, "_"), "pp_overlay.png", sep = "")), width = 5, height = 5)
+  ggsave(file =  file.path(delivDir, paste0(paste0(cnt, "_"), "pp_overlay.png", sep = "")), width = 5, height = 5)
 }
 csv_store <- function(sample, delivDir, cnt, type= "each"){
-  if(type == "each"){
+  if(type == "each") {
     write.csv(as_draws_df(sample), file =  file.path(delivDir, paste0(paste0(cnt, "_"), "each.csv", sep = "")))
-  }else{
+ } else if (type == "evolve"){
     write.csv(apply(sample,2,as.character), file =  file.path(delivDir, paste0(paste0(cnt, "_"), "evolve.csv", sep = "")))
+ } else{
+    write.csv(sample, file =  file.path(delivDir, paste0(paste0(cnt, "_"), "ecdf.csv", sep = "")))
   }
 }
 intv_plot_save <- function(evolve_df){
-  intv <- subset_draws(mutate_variables(as_draws_df(lapply(evolve_df, as.numeric)), low1sd = (median + mad), up1sd = (median - mad)) , c("iter", "low1sd", "up1sd"))
+  intv <- subset_draws(mutate_variables(as_draws_df(lapply(evolve_df, as.numeric)), low1sd = (median + mad), up1sd = (median - mad)) , c("low1sd", "up1sd"))
   intv$iter <- as.numeric(rownames(evolve_df))
   intv <- reshape2::melt(intv, id.vars = "iter")
   intv <- filter(intv, variable == "low1sd" | variable == "up1sd")
