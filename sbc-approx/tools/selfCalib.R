@@ -1,32 +1,32 @@
 source("tools/functions.r")
-selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, delivDir, is_param = NULL){
+selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, delivDir, is_param = FALSE){
   data$theta_loc = mean(prior[[pars]])  #mean(prior) #summarise_draws(workflow$prior_samples)$mean
   data$theta_scale = sd(prior[[pars]]) #summarise_draws(workflow$prior_samples)$sd
   if(is_param){
     generator <- function(){
-      function(theta_hp){
+      function(iter, theta_hp){
         theta <- rnorm(1, theta_hp)
         list(
-          generated = rnorm(8, theta, 1),
+          generated = rnorm(8, theta[iter], 1),
           parameters = list(
-            theta = theta
+            theta = theta[iter]
           )
         )
       }
     }
     theta_hp <- unlist(summarise_draws()[c("mean", "sd")])
     workflow <- SBCWorkflow$new(stan_model, generator())
-    workflow$simulate(n_sbc_iterations = N, theta_hp = theta_hp)
+    workflow$simulate(n_sbc_iterations = N, theta_hp)
     workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
     next_prior <- workflow$posterior_samples[pars]
   }else{
     # nonparameteric generator but parameteric stan prior
     generator_np <- function(){
-      function(theta){
+      function(iter, theta){
         list(
-          generated = rnorm(8, theta, 1),
+          generated = rnorm(8, theta[iter], 1),
           parameters = list(
-            theta = theta
+            theta = theta[iter]
           )
         )
       }
@@ -34,7 +34,7 @@ selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, deliv
     workflow <- SBCWorkflow$new(stan_model, generator_np())
     # input samples of multiple parameter
     # custom_prior: https://github.com/hyunjimoon/SBC/blob/927da3f9bc87aca19a34f4dd2061f40eae3176ea/R/util.R#L83
-    workflow$simulate(n_sbc_iterations = N, param = is_param, as_draws_df(prior)[[pars]]) #custome_prior draws_of(prior[[par]])
+    workflow$simulate(n_sbc_iterations = N, as_draws_df(prior)[[pars]]) #custome_prior draws_of(prior[[par]])
     workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
     next_prior <- post_summ(workflow, pars, sumtype = "filtering")
   }
@@ -48,19 +48,18 @@ selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, deliv
     evolve_df <-rbind(evolve_df, as.numeric(d))
   }
   if (iter_stop(t_prior, t_post, bins)){
-    csv_store(t_prior, delivDir, cnt)
-    csv_store(evolve_df, delivDir, cnt,  type = "evolve")
+    csv_save(t_prior, delivDir, cnt, type = "each")
+    csv_save(evolve_df, delivDir, cnt, type = "evolve")
     intv_plot_save(evolve_df)
     return (prior) # calibrated only for the target
   }
   else{
-    csv_store(t_prior, delivDir, cnt)
     cnt = cnt + 1
     return (selfCalib(stan_model, next_prior, pars, data, N, M, cnt, evolve_df, delivDir, is_param = is_param))
   }
 }
 
-iter_stop <- function(prior, post, bins = 30){
+iter_stop <- function(prior, post, bins = 10){
   post_r_loc <- lapply(post, mean)
   post_r_scale <- lapply(post, sd)
   r_loc <- list()
@@ -75,17 +74,16 @@ iter_stop <- function(prior, post, bins = 30){
 
 # summarize NM posterior samples to N for each parameter
 post_summ <- function(workflow, pars, sumtype){
-  prior <- subset_draws(workflow$prior_samples, variables = pars)
-  post <- subset_draws(workflow$posterior_samples, variables = pars)
   # need to work for multiple pars
   if (sumtype == "filtering"){
-    if(length(draws_of(prior[[par]])) < 10){
+    if(dim(draws_of(workflow$prior_samples[[pars]]))[1] < 10){
       return (workflow$posterior_samples[names(prior_rv)])
     }else{
       for (par in pars){
-        prior_par <- as_draws_df(prior)[[pars]] #draws_of(prior[[par]])
-        post_par <- as_draws_df(post)[[pars]] #draws_of(post[[par]])
+        prior_par <-draws_of(workflow$prior_samples[[par]])  #as_draws_df(prior)[[pars]] #draws_of(prior[[par]])
+        post_par <- draws_of(workflow$posterior_samples[[par]]) #draws_of(post[[par]])
         q_prior <- as_draws_df(workflow$prior_samples) # to borrow the frame
+        print(dim(prior_par))
         q_prior[[par]]  <- sort(prior_par)
         ar <- as_draws_array(resample_draws(q_prior, tabulate(ecdf(prior_par)(post_par) * N, nbins = length(prior_par))))
         return (as_draws_rvars(aperm(ar, c(2,1,3))))
@@ -95,6 +93,7 @@ post_summ <- function(workflow, pars, sumtype){
     return (subset_draws(post,variable = names(prior), iteration = 1))
   }
 }
+
 
 initDf <-function(L, summary, pars = NA){
   if(summary == "ms"){

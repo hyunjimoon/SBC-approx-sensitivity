@@ -9,6 +9,7 @@ library(dplyr)
 library(tidyverse)
 library(reshape)
 library(parallel)
+library(bayesplot)
 library(posterior)
 #library(rstanarm)
 devtools::install_github("hyunjimoon/SBC",ref="workflow")
@@ -18,7 +19,6 @@ library("entropy")
 set.seed(1954)
 .libPaths("~/Rlib")
 source("tools/selfCalib.R")
-source("tools/functions.r")
 options(mc.cores = parallel::detectCores())
 set_get_Dir <- function(modelName){
   scriptDir <- getwd()
@@ -41,7 +41,7 @@ delivDir <- set_get_Dir(modelName)$delivDir
 file <- set_get_Dir(modelName)$file
 simple_normal = cmdstanr::cmdstan_model(file)
 generator <- function(){  
-    function(){
+    function(iter){
     theta <- rnorm(1, 0, 1)
     list(
       generated = rnorm(8, theta, 1),
@@ -52,48 +52,55 @@ generator <- function(){
   }
 }
 par = "theta"
+var = "theta" # affects iter_stop related to decision variable/objective fucntion
 D <- 8
 y <- rep(0, D) # placeholder
 data = list("D"= D, "y"= y, "theta_loc"= 0, "theta_scale"= 1)
 nChains <- 4
 parallel_chains <- min(nChains, detectCores())
-N = 1000
-M = 10 # 40
+N = 1000 #1000
+M = 50 # 50
 workflow <- SBCWorkflow$new(simple_normal, generator())
-workflow$simulate(N) 
-workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
+workflow$simulate(n_sbc_iterations = N) 
+workflow$fit_model(sample_iterations = M, warmup_iterations = 500, data)
 prior <- workflow$prior_samples
 post <- workflow$posterior_samples
-workflow$calculate_rank()
-plot_ecdf_diff(workflow, var="theta")
+rank <- workflow$calculate_rank()
 
 #target calibration
-par<-  "theta" #names(prior)[c(1)] 
 evolve_df <- initDf(1, summary = "pars")
 sc_prior <-  selfCalib(stan_model = simple_normal, prior, par, data, N, M, cnt = 1, evolve_df, delivDir, is_param = FALSE)
-
 # test self-consistency for sc_prior
 generator_np <- function(){
-  function(theta){
+  function(iter, theta){
     list(
-      generated = rnorm(8, theta, 1),
+      generated = rnorm(8, theta[iter], 1),
       parameters = list(
-        theta = theta
+        theta = theta[iter]
       )
     )
   }
 }
-sc_workflow <- SBCWorkflow$new(stan_model, generator_np())
-sc_workflow$simulate(n_sbc_iterations = N, param = is_param, as_draws_df(sc_prior)[[pars]])
+sc_workflow <- SBCWorkflow$new(simple_normal, generator_np())
+sc_workflow$simulate(n_sbc_iterations = N, as_draws_df(sc_prior)[[pars]])
 data$theta_loc = mean(sc_prior[[pars]])  
 data$theta_scale = sd(sc_prior[[pars]])
-sc_workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
+sc_workflow$fit_model(sample_iterations = M, warmup_iterations = 500, data)
 sc_pri <- sc_workflow$prior_samples
 sc_post <- sc_workflow$posterior_samples
 sc_workflow$calculate_rank()
-plot_ecdf_diff(sc_workflow, var="theta")
-```
 
+# before after compare with ecdf and rank summary
+g <- plot_ecdf_diff(workflow, K = M, var = var)
+sc_g <- plot_ecdf_diff(sc_workflow, K = M, var = var)
+ggsave(g, file =  file.path(delivDir, paste0(paste0(paste0(var, "_"), "bfCalib_ecdf.png"), sep = "")))
+ggsave(sc_g, file =  file.path(delivDir, paste0(paste0(paste0(var, "_"), "afCalib_ecdf.png"), sep = "")))
+
+bf <- rank_summary(as_draws_matrix(workflow$calculated_ranks), par, bins = 20)
+af <- rank_summary(as_draws_matrix(sc_workflow$calculated_ranks), par, bins = 20)
+csv_save(list(bf, af),delivDir, type = "diagnositcs")
+
+```
 
 # 2. $p_d$ effect: linear regression with two coefficient parameters with distribution
 ```{R}
@@ -139,7 +146,6 @@ rnorm(X %*% param, 1.2)
   y = rnorm(X %*% param, 1.2)
   data = list("N"=N, "X"= X, "y" = y, "param_loc" = param_loc, "param_scale" = param_scale)
 return (data)
-}
 }
 
 D <- 8
@@ -901,4 +907,3 @@ curve(invlogit(cbind(1, x/100, 0.5) %*% coef(fit_3)), add=TRUE)
 curve(invlogit(cbind(1, x/100, 1.0) %*% coef(fit_3)), add=TRUE)
 
 ```
-
