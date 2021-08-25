@@ -1,118 +1,117 @@
 source("tools/functions.r")
-selfCalib <- function(stan_model, prior, pars, data, N, M, cnt, evolve_df, delivDir, is_param = FALSE){
-  data$theta_loc = mean(prior[[pars]])  #mean(prior) #summarise_draws(workflow$prior_samples)$mean
-  data$theta_scale = sd(prior[[pars]]) #summarise_draws(workflow$prior_samples)$sd
-  if(is_param){
-    generator <- function(){
-      function(iter, theta_hp){
-        theta <- rnorm(1, theta_hp)
-        list(
-          generated = rnorm(8, theta[iter], 1),
-          parameters = list(
-            theta = theta[iter]
-          )
-        )
-      }
+##' Auto calibrate the initial prior samples using SBC iteration
+##'
+##' @param priors rvars<n_priorval>[n_dataval] prior values i.e. parameter values to be tested "draws_rvars"
+##' @param predictor rvars<n_dataval>[n_priorval] predictor values
+##' @param generator_priorvals function that generates datasets given each value in `priors`
+##' @param stan_mod stan_model that samples posterior with `datasets` simulated from the former two
+##' @param target_vars function of parameters with which SBC iteration convergence are judged
+##' @param n_dataval the number of simulated data points from each prior value (default 4000)
+##' @param n_sample the number of simulated posterior from each prior value (default 4000)
+##' @param cnt function of parameters with which SBC iteration convergence are judged
+##' @param evolve_df datafraame holding `median, mad (or sd)` of samples from every iteration
+##' @param delivDir save location of output result
+##' @return  next priors summarized from `n_priorval` * `n_sample` posterior samples
+##' @export
+
+selfCalib <- function(priors, predictor, generator_priorvals, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir){
+  n_priorval <- niterations(priors)
+  backend <- SBC_backend_cmdstan_sample(stan_mod, iter_sampling = n_sample, chains = 1) # M/4, chains = 4)
+  results <- compute_results(generator_priorvals(priors, n_dataval, predictor), backend)
+  for (tv in target_vars){
+    summ <- summarise_draws(priors, median, sd) %>% filter(variable == tv)
+    evolve_df[[tv]]$median[cnt] <- as.numeric(summ["median"])
+    evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
+  }
+
+  next_priors <- post2pri(priors, results, target_vars, sumtype = "post2prior_reweight", cnt)
+
+  priors_next_priors_close <- iter_stop(priors, next_priors, results, target_vars = NULL, sumtype = "post2prior_reweight")
+  # iter_stop much stabilized when n_priorval vs n_priorval compared to n_priorval vs n_priorval * 4000 (= n_sample)
+  if (priors_next_priors_close || is.na(priors_next_priors_close)){ #NA if the two are the same `draws_rvars`
+    for (tv in target_vars){
+      summ <- summarise_draws(priors, median, sd) %>% filter(variable == tv)
+      evolve_df[[tv]]$median[cnt] <- as.numeric(summ["median"])
+      evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
+      csv_save(priors, delivDir, cnt, type = "each")
+      csv_save(evolve_df, delivDir, cnt, type = "each")
+      #intv_plot_save(evolve_df[[v]])
     }
-    theta_hp <- unlist(summarise_draws()[c("mean", "sd")])
-    workflow <- SBCWorkflow$new(stan_model, generator())
-    workflow$simulate(n_sbc_iterations = N, theta_hp)
-    workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
-    next_prior <- workflow$posterior_samples[pars]
+
+    return (priors) # calibrated only for the target
   }else{
-    # nonparameteric generator but parameteric stan prior
-    generator_np <- function(){
-      function(iter, theta){
-        list(
-          generated = rnorm(8, theta[iter], 1),
-          parameters = list(
-            theta = theta[iter]
-          )
-        )
-      }
-    }
-    workflow <- SBCWorkflow$new(stan_model, generator_np())
-    # input samples of multiple parameter
-    # custom_prior: https://github.com/hyunjimoon/SBC/blob/927da3f9bc87aca19a34f4dd2061f40eae3176ea/R/util.R#L83
-    workflow$simulate(n_sbc_iterations = N, as_draws_df(prior)[[pars]]) #custome_prior draws_of(prior[[par]])
-    workflow$fit_model(sample_iterations = M, warmup_iterations = M, data)
-    next_prior <- post_summ(workflow, pars, sumtype = "filtering")
-  }
-  t_prior <- workflow$prior_samples[pars]
-  t_post <- workflow$posterior_samples[pars]
-  pp_overlay_rvar(t_prior, t_post, pars, cnt)
-  if(cnt == 1){
-    evolve_df[row(evolve_df)==cnt] <-summarise_draws(t_prior, median, mad)[2:3]
-  }else{
-    d <- summarise_draws(t_prior, median, mad)[2:3]
-    evolve_df <-rbind(evolve_df, as.numeric(d))
-  }
-  if (iter_stop(t_prior, t_post, bins)){
-    csv_save(t_prior, delivDir, cnt, type = "each")
-    csv_save(evolve_df, delivDir, cnt, type = "evolve")
-    intv_plot_save(evolve_df)
-    return (prior) # calibrated only for the target
-  }
-  else{
     cnt = cnt + 1
-    return (selfCalib(stan_model, next_prior, pars, data, N, M, cnt, evolve_df, delivDir, is_param = is_param))
+    return (selfCalib(next_priors, predictor, generator_priorvals, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir))
+  }
+}
+##' Judge whether the SBC iteration have converged
+##'
+##' @param priors numeric vector of prior values i.e. parameter values to be tested
+##' @param posteriors numeric vector of posterior values i.e. sampled parameter values
+##' @param results computed results with `generator_truepoints(priors), backend)
+##' @param target_vars function of parameters with which SBC iteration convergence are judged
+##' @param n_sample the number of posterior samples for each prior value (default 4000)
+##' @param cnt function of parameters with which SBC iteration convergence are judged
+##' @param sumtype types are classified by object and size of compared distribution
+##'                object: generic parameters vs targeted functions of parameter
+##'                size: `niterations` are same (`prior2prior`) vs different (`prior2post`)
+##' @param bins the number of bins to discretize samples
+##' @return distance between prior and posterior samples
+##' @export
+iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins = 10){
+  if (is.null(target_vars)){
+    post_r_loc <- lapply(next_priors, mean)
+    post_r_scale <- lapply(next_priors, sd)
+    r_loc <- list()
+    r_scale <- list()
+    for (par in names(priors)){
+      r_loc <- append(r_loc, E(priors[[par]]) / post_r_loc[[par]])
+      r_scale <- append(r_scale, sd(priors[[par]]) / post_r_scale[[par]])
+    }
+    return (all(r_loc > 0.9 && r_loc < 1.1 && r_scale > 0.9 && r_scale < 1.1 ))
+  }else{
+    return(all(unlist(lapply(target_vars, FUN = function(tv) {cjs_dist(draws_of(priors[[tv]]), draws_of(next_priors[[tv]])) < 0.1}))))
   }
 }
 
-iter_stop <- function(prior, post, bins = 10){
-  post_r_loc <- lapply(post, mean)
-  post_r_scale <- lapply(post, sd)
-  r_loc <- list()
-  r_scale <- list()
-  for (par in names(prior)){
-    r_loc <- append(r_loc, E(prior[[par]]) / post_r_loc[[par]])
-    r_scale <- append(r_scale, sd(prior[[par]]) / post_r_scale[[par]])
-  }
-  #dist_summary(prior, post, par, bins)$Minkowski_2 < 100
-  return (all(r_loc > 0.9 && r_loc < 1.1 && r_scale > 0.9 && r_scale < 1.1 ))
-}
-
-# summarize NM posterior samples to N for each parameter
-post_summ <- function(workflow, pars, sumtype){
-  # need to work for multiple pars
-  if (sumtype == "filtering"){
-    if(dim(draws_of(workflow$prior_samples[[pars]]))[1] < 10){
-      return (workflow$posterior_samples[names(prior_rv)])
-    }else{
-      for (par in pars){
-        prior_par <-draws_of(workflow$prior_samples[[par]])  #as_draws_df(prior)[[pars]] #draws_of(prior[[par]])
-        post_par <- draws_of(workflow$posterior_samples[[par]]) #draws_of(post[[par]])
-        q_prior <- as_draws_df(workflow$prior_samples) # to borrow the frame
-        print(dim(prior_par))
-        q_prior[[par]]  <- sort(prior_par)
-        ar <- as_draws_array(resample_draws(q_prior, tabulate(ecdf(prior_par)(post_par) * N, nbins = length(prior_par))))
-        return (as_draws_rvars(aperm(ar, c(2,1,3))))
+# Resample for valid compare between `priors`, `next_priors` and to control `n_priorval`
+# n_priorval * n_sample posterior  n_priorvals as comparison threshold is possible for the same number of samples
+##'
+##' @param priors numeric vector of prior values i.e. parameter values to be tested
+##' @param results computed results with `generator_truepoints(priors), backend)
+##' @param target_vars function of parameters with which SBC iteration convergence are judged
+##' @param sumtype types are classified by object and size of compared distribution
+##'                object: generic parameters vs targeted functions of parameter
+##'                size: `niterations` are same (`prior2prior`) vs different (`prior2post`)
+##' @param cnt needed to keep track of iteration counts
+##' @return resampled posterior with prior information
+##' @export
+post2pri <-function(priors, results, target_vars, sumtype, cnt = 0){
+  n_priorval <- niterations(priors)
+  post_mtr <- SBC_fit_to_draws_matrix(results$fits[[1]])
+  n_post <- nchains(post_mtr) * niterations(post_mtr) # default nchains = 4
+  priors_tpl <- priors # template
+  for (tv in target_vars){
+    post_mtr <- matrix(NA, nrow = n_post, ncol = n_priorval)
+    for (i in 1:n_priorval){
+      post_mtr[,i] <- c(subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), variable = tv))
+    }
+    priors_v <- c(as_draws_df(priors)[[tv]])
+    pp_overlay_save(priors_v, post_mtr, tv, cnt)
+    if(n_priorval < 10 || sumtype == "post2prior"){
+      priors_tpl[[tv]] <- rvar(c(post_mtr))
+    }else if(grepl("post2prior", sumtype, fixed = TRUE)){
+      if (sumtype == "post2prior_randpick"){
+        for (i in 1:n_priorval){
+          post_mtr_i <- subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), varaible = tv)
+          priors_tpl[[tv]] <- rvar(post_mtr_i)[sample(1:n_post, n_priorval)]
+        }
+      }else if (sumtype == "post2prior_reweight"){
+        prior_sort  <- sort(results$stats %>% filter(parameter == tv) %>% pull(simulated_value))
+        ar <- resample_draws(as_draws_rvars(sort(priors[[tv]])), tabulate(ecdf(prior_sort)(c(post_mtr)) * n_priorval, nbins = n_priorval))
+        priors_tpl[[tv]] <- ar[[1]]
       }
     }
-  }else if(sumtype == "sample"){ # only choose the first
-    return (subset_draws(post,variable = names(prior), iteration = 1))
   }
-}
-
-
-initDf <-function(L, summary, pars = NA){
-  if(summary == "ms"){
-    df <- data.frame(
-                     mean = rep(NA,L),
-                     sd = rep(NA,L)
-    )
-  }else if (summary == "q"){
-    df <- data.frame(
-                     q1 = rep(NA,L),
-                     q3 = rep(NA,L)
-    )
-  }else if (summary == "pars"){
-    df <- data.frame(
-      median = rep(NA,L),
-      mad = rep(NA,L)
-      #tau_mean = rep(NA,L),
-      #tau_sd = rep(NA,L)
-    )
-  }
-  df
+  return (priors_tpl)
 }
