@@ -2,8 +2,8 @@ source("tools/functions.r")
 ##' Auto calibrate the initial prior samples using SBC iteration
 ##'
 ##' @param priors rvars<n_priorval>[n_dataval] prior values i.e. parameter values to be tested "draws_rvars"
-##' @param predictor rvars<n_dataval>[n_priorval] predictor values
 ##' @param generator_priorvals function that generates datasets given each value in `priors`
+##' @param predictor rvars<n_dataval>[n_priorval] predictor values
 ##' @param stan_mod stan_model that samples posterior with `datasets` simulated from the former two
 ##' @param target_vars function of parameters with which SBC iteration convergence are judged
 ##' @param n_dataval the number of simulated data points from each prior value (default 4000)
@@ -14,7 +14,7 @@ source("tools/functions.r")
 ##' @return  next priors summarized from `n_priorval` * `n_sample` posterior samples
 ##' @export
 
-selfCalib <- function(priors, predictor, generator_priorvals, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir){
+selfCalib <- function(priors, generator_priorvals, predictor, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir){
   n_priorval <- niterations(priors)
   backend <- SBC_backend_cmdstan_sample(stan_mod, iter_sampling = n_sample, chains = 1) # M/4, chains = 4)
   results <- compute_results(generator_priorvals(priors, n_dataval, predictor), backend)
@@ -41,7 +41,7 @@ selfCalib <- function(priors, predictor, generator_priorvals, stan_mod, target_v
     return (priors) # calibrated only for the target
   }else{
     cnt = cnt + 1
-    return (selfCalib(next_priors, predictor, generator_priorvals, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir))
+    return (selfCalib(next_priors, generator_priorvals, predictor, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir))
   }
 }
 ##' Judge whether the SBC iteration have converged

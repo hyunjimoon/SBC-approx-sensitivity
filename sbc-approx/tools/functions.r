@@ -214,9 +214,9 @@ runModel <- function(model, data, iter, warmup, thin, init, seed, chain = 1,
                sep = ""))
 }
 
-pp_overlay_save <- function(prior, post, var, cnt = 0){
+pp_overlay_save <- function(prior, post, tv, cnt = 0){
   ppc_dens_overlay(prior, post) #ppc_dens_overlay(c(draws_of(prior)), c(draws_of(next_prior)))
-  ggsave(file =  file.path(delivDir, paste0(var, paste0(paste0( cnt, "_"), "pp.png", sep = ""))))
+  ggsave(file =  file.path(delivDir, paste0(tv, paste0(paste0( cnt, "_"), "pp.png", sep = ""))))
 }
 
 dist_save <- function(sample, delivDir, cnt, type= "each"){
@@ -250,16 +250,16 @@ set_get_Dir <- function(modelName){
   return(list(data = data, mod = mod, modDir = modDir, file = file, delivDir = delivDir))
 }
 
-csv_save <- function(sample, delivDir, type, cnt = NULL){
+csv_save <- function(res, delivDir, type, cnt = NULL){
   if(type == "each") {
-    write.csv(as_draws_df(sample), file =  file.path(delivDir, paste0(paste0(cnt, "_"), "each.csv", sep = "")))
+    write.csv(as_draws_df(res), file =  file.path(delivDir, paste0(paste0(cnt, "_"), "each.csv", sep = "")))
   } else if (type == "evolve"){
-    for(v in names(sample))write.csv(sample, file = file.path(paste0(paste0(delivDir, paste0(v, "_evolve_df.csv")))))
+    for(v in names(res)) write.csv(res, file = file.path(paste0(paste0(delivDir, paste0(v, "_evolve_df.csv")))))
   } else if (type == "ecdf"){
-    for(v in names(sample))write.csv(sample, file =  file.path(delivDir, paste0(paste0(cnt, "_"), "ecdf.csv", sep = "")))
+    for(v in names(res)) write.csv(res, file =  file.path(delivDir, paste0(paste0(cnt, "_"), "ecdf.csv", sep = "")))
   } else if (type == "diagnositcs"){
-    write.csv(sample, file =  file.path(delivDir, paste0(paste0(var, "_"), "diagnositcs.csv", sep = "")))
-  }
+      write.csv(res, file =  file.path(delivDir, "diagnositcs.csv"))
+    }
 }
 
 initDf <-function(L, summary, target_vars){
