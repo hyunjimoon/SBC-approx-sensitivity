@@ -24,9 +24,9 @@ selfCalib <- function(priors, predictor, generator_priorvals, stan_mod, target_v
     evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
   }
 
-  next_priors <- post2pri(priors, results, target_vars, sumtype = "post2prior_reweight", cnt)
+  next_priors <- adj_post(priors, results, target_vars, sumtype = "adj_postor_reweight", cnt)
 
-  priors_next_priors_close <- iter_stop(priors, next_priors, results, target_vars = NULL, sumtype = "post2prior_reweight")
+  priors_next_priors_close <- iter_stop(priors, next_priors, results, target_vars = NULL, sumtype = "adj_postor_reweight")
   # iter_stop much stabilized when n_priorval vs n_priorval compared to n_priorval vs n_priorval * 4000 (= n_sample)
   if (priors_next_priors_close || is.na(priors_next_priors_close)){ #NA if the two are the same `draws_rvars`
     for (tv in target_vars){
@@ -58,7 +58,7 @@ selfCalib <- function(priors, predictor, generator_priorvals, stan_mod, target_v
 ##' @param bins the number of bins to discretize samples
 ##' @return distance between prior and posterior samples
 ##' @export
-iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins = 10){
+iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins = 20){
   if (is.null(target_vars)){
     post_r_loc <- lapply(next_priors, mean)
     post_r_scale <- lapply(next_priors, sd)
@@ -86,7 +86,7 @@ iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins =
 ##' @param cnt needed to keep track of iteration counts
 ##' @return resampled posterior with prior information
 ##' @export
-post2pri <-function(priors, results, target_vars, sumtype, cnt = 0){
+adj_post <-function(priors, results, target_vars, sumtype, cnt = 0){
   n_priorval <- niterations(priors)
   post_mtr <- SBC_fit_to_draws_matrix(results$fits[[1]])
   n_post <- nchains(post_mtr) * niterations(post_mtr) # default nchains = 4
@@ -98,15 +98,16 @@ post2pri <-function(priors, results, target_vars, sumtype, cnt = 0){
     }
     priors_v <- c(as_draws_df(priors)[[tv]])
     pp_overlay_save(priors_v, post_mtr, tv, cnt)
-    if(n_priorval < 10 || sumtype == "post2prior"){
+
+    if(n_priorval < 10 || sumtype == "MtoM"){
       priors_tpl[[tv]] <- rvar(c(post_mtr))
-    }else if(grepl("post2prior", sumtype, fixed = TRUE)){
-      if (sumtype == "post2prior_randpick"){
+    }else if(grepl("Mto1", sumtype, fixed = TRUE)){
+      if (sumtype == "Mto1_randpick"){
         for (i in 1:n_priorval){
           post_mtr_i <- subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), varaible = tv)
           priors_tpl[[tv]] <- rvar(post_mtr_i)[sample(1:n_post, n_priorval)]
         }
-      }else if (sumtype == "post2prior_reweight"){
+      }else if (sumtype == "Mto1_reweight"){
         prior_sort  <- sort(results$stats %>% filter(parameter == tv) %>% pull(simulated_value))
         ar <- resample_draws(as_draws_rvars(sort(priors[[tv]])), tabulate(ecdf(prior_sort)(c(post_mtr)) * n_priorval, nbins = n_priorval))
         priors_tpl[[tv]] <- ar[[1]]

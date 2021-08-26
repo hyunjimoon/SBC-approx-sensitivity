@@ -31,7 +31,7 @@ modDir <- set_get_Dir(modelName)$modDir
 delivDir <- set_get_Dir(modelName)$delivDir
 file <- set_get_Dir(modelName)$file
 mod_simple_normal = cmdstanr::cmdstan_model(file)
-n_prival = 20 # the number of generated parameter values for each dataset
+n_prival = 3 # the number of generated parameter values for each dataset
 n_dataval = 8 # the number of generated data values for each dataset
 n_sample = 4000 # the number of posterior samples for each dataset (nchains * ndraws)
 
@@ -46,7 +46,7 @@ generator_priorvals_simple <- function(true_params, n_dataval, predictor = NULL)
     generated = draws_rvars_to_standata(gen_rvars)
   )
 }
-datasets_simple <- generator_priorvals_simple(draws_rvars(theta = rvar_rng(rnorm, 1, mean = 3, sd = 4, ndraws = n_prival)), n_dataval) 
+datasets_simple <- generator_priorvals_simple(draws_rvars(theta = rvar_rng(rnorm, 1, mean = 3, sd = 4, ndraws = n_prival)), n_dataval) #(n, ndraws) = (1, n_prival) for params, (n_prival, 1) for predictors
 backend_simple <- SBC_backend_cmdstan_sample(mod_simple_normal)
 result_simple <- compute_results(datasets_simple, backend_simple)
 priors <- as_draws_rvars(subset_draws(datasets_simple$parameters, variable = tv))
@@ -55,7 +55,7 @@ priors <- as_draws_rvars(subset_draws(datasets_simple$parameters, variable = tv)
 evolve_df <- list()
 evolve_df[[tv]] <- list(median = rep(NA,1), sd = rep(NA,1))
 predictor = NULL 
-sc_priors <- selfCalib(priors, predictor, generator_priorvals_simple, mod_simple_normal, tv, n_dataval, n_sample, cnt = 1, evolve_df, delivDir)
+sc_priors <- selfCalib(priors, generator_priorvals_simple, predictor, mod_simple_normal, tv, n_dataval, n_sample, cnt = 1, evolve_df, delivDir)
 # test self-consistency for sc_prior
 sc_datasets_simple <- generator_priorvals_simple(sc_priors, n_dataval) 
 sc_result_simple <- compute_results(sc_datasets_simple, backend_simple) 
@@ -63,16 +63,16 @@ sc_result_simple <- compute_results(sc_datasets_simple, backend_simple)
 # graphical inspection
 g <- plot_ecdf_diff(result_simple)
 sc_g <- plot_ecdf_diff(sc_result_simple)
-ggsave(g, file =  file.path(delivDir, paste0(paste0(paste0(var, "_"), "bfCalib_ecdf.png"), sep = "")))
-ggsave(sc_g, file =  file.path(delivDir, paste0(paste0(paste0(var, "_"), "afCalib_ecdf.png"), sep = "")))
+ggsave(g, file =  file.path(delivDir, paste0(paste0(paste0(tv, "_"), "bfCalib_ecdf.png"), sep = "")))
+ggsave(sc_g, file =  file.path(delivDir, paste0(paste0(paste0(tv, "_"), "afCalib_ecdf.png"), sep = "")))
 # numeric inspection
-priors_next <- post2pri(priors, result_simple, tv, sumtype = "prior2prior_filtering") 
-sc_priors_next <- post2pri(sc_priors, sc_result_simple, tv, sumtype = "prior2prior_filtering")
+priors_next <- adj_post(priors, result_simple, tv, sumtype = "MtoM") 
+sc_priors_next <- adj_post(sc_priors, sc_result_simple, tv, sumtype = "MtoM")
 self_cons_msr_bfcalib <- set2set(priors, priors_next, "theta")                                                
 self_cons_msr_afcalib <- set2set(sc_priors, sc_priors_next, "theta")
-csv_save(list(before = self_cons_msr_bfcalib, after = self_cons_msr_afcalib), delivDir, type = "diagnositcs")
+csv_save(list(before = unlist(self_cons_msr_bfcalib), after = unlist(self_cons_msr_afcalib)), "theta", delivDir, type = "diagnositcs")
 ```
-Both numerical and graphical ecdf indicate that `sc_g` is better calibrated than `g`.
+Both numerical (cumulative JS distance: 0.17 vs 0.099) and graphical ecdf indicate that `sc_g` is better calibrated than `g`.
 
 ## 2. sgmd model
 ### 2.1.sgmd model1 with different data region; x = rnorm(20, [0, 5], 2) 
@@ -113,7 +113,7 @@ pairs(fit_sgmd_divergent_rstan, pars = "energy__", include = FALSE)
 Different data region with the same likelihood and prior distribution can be divergent. Although the calibration was good with $x \sim N(0,2^2)$ and without any divergence, both SBC ecdf_diff and pairs plot returns bad result for the dataspace corresponding to predictor $x \sim norm(5,2)$ with the same likelihood and prior distribution.
 ```{R, sgmd1 with norm(5,2) dataset}
 set.seed(2000)
-datasets_sgmd_x5_init <- generator_priorvals_sgmd(true_params = draws_rvars(w = rvar(rnorm(n_priorval, 0, 1)), b = rvar(rnorm(n_priorval, 0, 1))), predictor = draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2, ndraws = 1)), n_dataval)
+datasets_sgmd_x5_init <- generator_priorvals_sgmd(true_params = draws_rvars(w = rvar(rnorm(n_priorval, 0, 1)), b = rvar(rnorm(n_priorval, 0, 1))), n_dataval, predictor = draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2, ndraws = 1)))
 result_sgmd_x5_init <- compute_results(datasets_sgmd_x5_init, backend_sgmd)
 plot_ecdf_diff(result_sgmd_x5_init)
 fit_sgmd_divergent <- sampling(rstan::stan_model(file = set_get_Dir(modelName)$file),
@@ -124,7 +124,7 @@ pairs(fit_sgmd_divergent, pars = "energy__", include = FALSE)
 Would changing the `prior width` mitigate the problem? From 10 to 1 or 30? It turns out wider prior width leads to greater divergence.
 ```{R}
 set.seed(1954)
-generator_priorvals_sgmd_w <- function(true_params, predictor, n_dataval, priorwidth){
+generator_priorvals_sgmd_w <- function(true_params, n_dataval, predictor, priorwidth){
   n_priorval = ndraws(true_params)
   x = predictor$x 
   sigma = rvar(rep(0.1, n_priorval))
@@ -139,8 +139,10 @@ generator_priorvals_sgmd_w <- function(true_params, predictor, n_dataval, priorw
     generated = draws_rvars_to_standata(gen_rvars)
   )
 }
-datasets_sgmd_x5_w1 <- generator_priorvals_sgmd_w(true_params = draws_rvars(w = rvar(rnorm(n_priorval, 0, 1)), b = rvar(rnorm(n_priorval, 0, 1))), predictor = draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2,)), n_dataval, 1)
-datasets_sgmd_x5_w30 <- generator_priorvals_sgmd_w(true_params = draws_rvars(w = rvar(rnorm(n_priorval, 0, 1)), b = rvar(rnorm(n_priorval, 0, 1))),  predictor = draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2,)), n_dataval, 30)
+datasets_sgmd_x5_w1 <- generator_priorvals_sgmd_w(true_params = draws_rvars(w = rvar(rnorm(n_priorval, 0, 1)), b = rvar(rnorm(n_priorval, 0, 1))), n_dataval,
+                                                  predictor = draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2, ndraws = 1)), priorwidth = 1)
+datasets_sgmd_x5_w30 <- generator_priorvals_sgmd_w(true_params = draws_rvars(w = rvar(rnorm(n_priorval, 0, 1)), b = rvar(rnorm(n_priorval, 0, 1))), n_dataval, 
+                                                   predictor = draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2, ndraws = 1)), priorwidth = 30)
 result_sgmd_x5_w1 <- compute_results(datasets_sgmd_x5_w1, backend_sgmd)
 result_sgmd_x5_w30 <- compute_results(datasets_sgmd_x5_w30, backend_sgmd)
 plot_ecdf_diff(result_sgmd_x5_w1)
@@ -162,8 +164,8 @@ priors_sgmd_init <- as_draws_rvars(subset_draws(datasets_sgmd_x5_init$parameters
 evolve_df <- list()
 for (v in tv){evolve_df[[v]] <- list(median = rep(NA,1), sd = rep(NA,1))}
 predictor <- draws_rvars(x = rvar_rng(rnorm, n_priorval, 5, 2, ndraws = 1))
-priors_sgmd_sc <- selfCalib(priors_sgmd_init, predictor, generator_priorvals_sgmd, mod_sgmd, tv, n_dataval, n_sample, cnt = 1, evolve_df, delivDir)
-datasets_sgmd_sc <- generator_priorvals_sgmd(priors_sgmd_sc, predictor,n_dataval) 
+priors_sgmd_sc <- selfCalib(priors_sgmd_init, generator_priorvals_sgmd, predictor, mod_sgmd, tv, n_dataval, n_sample, cnt = 1, evolve_df, delivDir)
+datasets_sgmd_sc <- generator_priorvals_sgmd(priors_sgmd_sc, predictor, n_dataval) 
 result_sgmd_x5_sc <- compute_results(datasets_sgmd_sc, backend_sgmd)
 
 # before after compare with graphical and numerical summary
@@ -173,8 +175,8 @@ ggsave(g, file =  file.path(delivDir, "bfCalib_ecdf.png"))
 ggsave(sc_g, file = file.path(delivDir, "afCalib_ecdf.png"))
 
 # numeric inspection
-priors_next <- post2pri(priors, result_sgmd_x5_sc, "w", sumtype = "post2prior_reweight") 
-priors_next_sc <- post2pri(priors_sgmd_sc, result_sgmd_x5_sc, tv, sumtype = "post2prior_reweight")
+priors_next <- adj_post(priors, result_sgmd_x5_sc, "w", sumtype = "MtoM") 
+priors_next_sc <- adj_post(priors_sgmd_sc, result_sgmd_x5_sc, tv, sumtype = "MtoM")
 self_cons_msr_bfcalib <- list()
 self_cons_msr_afcalib <- list()
 self_cons_msr_bfcalib["w"] <- set2set(priors, priors_next, "w")
