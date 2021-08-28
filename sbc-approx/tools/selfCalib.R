@@ -14,19 +14,19 @@ source("tools/functions.r")
 ##' @return  next priors summarized from `n_priorval` * `n_sample` posterior samples
 ##' @export
 
-selfCalib <- function(priors, generator_priorvals, predictor, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir){
+selfCalib <- function(priors, generator_priorvals, predictor, hyperparams, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir){
   n_priorval <- niterations(priors)
-  backend <- SBC_backend_cmdstan_sample(stan_mod, iter_sampling = n_sample, chains = 1) # M/4, chains = 4)
-  results <- compute_results(generator_priorvals(priors, n_dataval, predictor), backend)
+  backend <- SBC_backend_cmdstan_sample(stan_mod, iter_sampling =  M/4, chains = 4)
+  results <- compute_results(generator_priorvals(priors, n_dataval, predictor, hyperparams), backend)
   for (tv in target_vars){
     summ <- summarise_draws(priors, median, sd) %>% filter(variable == tv)
     evolve_df[[tv]]$median[cnt] <- as.numeric(summ["median"])
     evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
   }
 
-  next_priors <- adj_post(priors, results, target_vars, sumtype = "adj_postor_reweight", cnt)
+  next_priors <- adj_post(priors, results, target_vars, sumtype = "Mto1_randpick", cnt)
 
-  priors_next_priors_close <- iter_stop(priors, next_priors, results, target_vars = NULL, sumtype = "adj_postor_reweight")
+  priors_next_priors_close <- iter_stop(priors, next_priors, results, target_vars = NULL, sumtype = "Mto1_randpick")
   # iter_stop much stabilized when n_priorval vs n_priorval compared to n_priorval vs n_priorval * 4000 (= n_sample)
   if (priors_next_priors_close || is.na(priors_next_priors_close)){ #NA if the two are the same `draws_rvars`
     for (tv in target_vars){
@@ -89,28 +89,26 @@ iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins =
 adj_post <-function(priors, results, target_vars, sumtype, cnt = 0){
   n_priorval <- niterations(priors)
   post_mtr <- SBC_fit_to_draws_matrix(results$fits[[1]])
-  n_post <- nchains(post_mtr) * niterations(post_mtr) # default nchains = 4
+  n_sample <- nchains(post_mtr) * niterations(post_mtr) # default nchains = 4
   priors_tpl <- priors # template
   for (tv in target_vars){
-    post_mtr <- matrix(NA, nrow = n_post, ncol = n_priorval)
+    priors_v <- sort(c(as_draws_df(priors)[[tv]]))
+    post_mtr <- matrix(NA, nrow = n_priorval, ncol = n_sample)
+    post_summ_mtr <- matrix(NA, nrow = n_priorval, ncol = n_priorval) #summarize n_sample to n_priorval
     for (i in 1:n_priorval){
-      post_mtr[,i] <- c(subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), variable = tv))
+      post_mtr[i,] <- c(subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), variable = tv))
+      post_summ_mtr[i,] <- draws_of(resample_draws(as_draws(rvar(priors_v)), tabulate(ecdf(priors_v)(c(post_mtr[i,])) * n_priorval, nbins = n_priorval))[[1]])
     }
-    priors_v <- c(as_draws_df(priors)[[tv]])
-    pp_overlay_save(priors_v, post_mtr, tv, cnt)
-
+    pp_overlay_save(priors_v, post_summ_mtr, tv, cnt)
     if(n_priorval < 10 || sumtype == "MtoM"){
       priors_tpl[[tv]] <- rvar(c(post_mtr))
     }else if(grepl("Mto1", sumtype, fixed = TRUE)){
       if (sumtype == "Mto1_randpick"){
         for (i in 1:n_priorval){
-          post_mtr_i <- subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), varaible = tv)
-          priors_tpl[[tv]] <- rvar(post_mtr_i)[sample(1:n_post, n_priorval)]
+          priors_tpl[[tv]] <- rvar(post_mtr[,i])[sample(1:n_sample, n_priorval)]
         }
       }else if (sumtype == "Mto1_reweight"){
-        prior_sort  <- sort(results$stats %>% filter(parameter == tv) %>% pull(simulated_value))
-        ar <- resample_draws(as_draws_rvars(sort(priors[[tv]])), tabulate(ecdf(prior_sort)(c(post_mtr)) * n_priorval, nbins = n_priorval))
-        priors_tpl[[tv]] <- ar[[1]]
+        priors_tpl[[tv]] <- post_summ_mtr[i,]
       }
     }
   }

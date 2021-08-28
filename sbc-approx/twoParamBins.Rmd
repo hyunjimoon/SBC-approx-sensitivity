@@ -1,0 +1,75 @@
+---
+title: "TwoParamBins"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+remotes::install_github("stan-dev/cmdstanr")
+library(cmdstanr)
+library(rstan)
+library(tidyverse)
+library(reshape)
+library(parallel)
+library(bayesplot)
+library(posterior)
+devtools::install_github("hyunjimoon/SBC")
+library(SBC)
+set.seed(1954)
+.libPaths("~/Rlib")
+source("tools/selfCalib.R")
+source("tools/functions.r")
+options(mc.cores = parallel::detectCores())
+library(future)
+plan(multisession)
+options(SBC.min_chunk_size = 5)
+```
+
+## Mean and sd with different prior widths.
+```{r two normal}
+set.seed(2000)
+modelName = "two_normal"
+delivDir <- set_get_Dir(modelName)$delivDir
+file <- set_get_Dir(modelName)$file
+mod_two_norm = cmdstanr::cmdstan_model(file)
+n_priorval = 1000
+n_dataval = 1
+n_sample = 1000
+predictor = NULL
+generator_priorvals <- function(true_params, n_dataval, predictor, hyperparams){
+  n_priorval = ndraws(true_params)
+  loc = true_params$loc
+  scale = true_params$scale
+  prior_width = hyperparams
+  # temporary bug
+  #y <- rvar_rng(rnorm, n = n_priorval, mean = loc, sd = scale, ndraws = n_dataval) 
+  y <- rfun(rnorm, ndraws = n_dataval)(n = n_priorval, mean = loc, sd = scale)
+  gen_rvars <- draws_rvars(N = n_priorval, y = y, prior_width = prior_width)
+  SBC_datasets(
+    parameters = as_draws_matrix(true_params), 
+    generated = draws_rvars_to_standata(gen_rvars)
+  )
+}
+backend_tn <- SBC_backend_cmdstan_sample(mod_two_norm)
+# favorable data region
+pws = c(1, 10, 100)
+#for (prior_width in pws){
+prior_width = 10
+datasets_tn_10 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
+result_tn_10 <- compute_results(datasets_tn_10, backend_tn)
+plot_rank_hist(result_tn_10)
+
+prior_width = 1
+datasets_tn_1 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
+result_tn_1 <- compute_results(datasets_tn_1, backend_tn)
+plot_rank_hist(result_tn_1)
+
+prior_width = 100
+datasets_tn_100 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
+result_tn_100 <- compute_results(datasets_tn_100, backend_tn)
+plot_rank_hist(result_tn_100)
+
+prior_width = 10000
+datasets_tn_10000 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
+result_tn_10000 <- compute_results(datasets_tn_10000, backend_tn)
+plot_rank_hist(result_tn_10000)
+```
