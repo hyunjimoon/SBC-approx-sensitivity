@@ -1,54 +1,49 @@
 source("tools/functions.r")
 ##' Auto calibrate the initial prior samples using SBC iteration
 ##'
-##' @param priors rvars<n_priorval>[n_dataval] prior values i.e. parameter values to be tested "draws_rvars"
-##' @param generator_priorvals function that generates datasets given each value in `priors`
-##' @param predictor rvars<n_dataval>[n_priorval] predictor values
+##' @param param rvars<S>[N] prior values i.e. parameter values to be tested "draws_rvars"
+##' @param generator function that generates datasets given each value in `param`
+##' @param predictor rvars<N>[S] predictor values
 ##' @param stan_mod stan_model that samples posterior with `datasets` simulated from the former two
 ##' @param target_vars function of parameters with which SBC iteration convergence are judged
-##' @param n_dataval the number of simulated data points from each prior value (default 4000)
+##' @param N the number of simulated data points from each prior value (default 4000)
 ##' @param n_sample the number of simulated posterior from each prior value (default 4000)
 ##' @param cnt function of parameters with which SBC iteration convergence are judged
 ##' @param evolve_df datafraame holding `median, mad (or sd)` of samples from every iteration
 ##' @param delivDir save location of output result
-##' @return  next priors summarized from `n_priorval` * `n_sample` posterior samples
+##' @return  next param summarized from `S` * `n_sample` posterior samples
 ##' @export
 
-selfCalib <- function(priors, generator_priorvals, predictor, hyperparams, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir){
-  n_priorval <- niterations(priors)
-  backend <- SBC_backend_cmdstan_sample(stan_mod, iter_sampling =  M/4, chains = 4)
-  results <- compute_results(generator_priorvals(priors, n_dataval, predictor, hyperparams), backend)
+selfCalib <- function(generator, hyperparam, param, predictor, backend, target_vars, cnt, evolve_df, delivDir){
+  result <- compute_results(generator(hyperparam, param, predictor), backend)
   for (tv in target_vars){
-    summ <- summarise_draws(priors, median, sd) %>% filter(variable == tv)
+    summ <- summarise_draws(param, median, sd) %>% filter(variable == tv)
     evolve_df[[tv]]$median[cnt] <- as.numeric(summ["median"])
     evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
   }
-
-  next_priors <- adj_post(priors, results, target_vars, sumtype = "Mto1_randpick", cnt)
-
-  priors_next_priors_close <- iter_stop(priors, next_priors, results, target_vars = NULL, sumtype = "Mto1_randpick")
-  # iter_stop much stabilized when n_priorval vs n_priorval compared to n_priorval vs n_priorval * 4000 (= n_sample)
-  if (priors_next_priors_close || is.na(priors_next_priors_close)){ #NA if the two are the same `draws_rvars`
+  next_param <- update_param(param, result, target_vars, cnt, delivDir)
+  param_next_param_close <- iter_stop(param, next_param, result, target_vars = NULL)
+  # iter_stop much stabilized when S vs S compared to S vs S * 4000 (= n_sample)
+  if (param_next_param_close || is.na(param_next_param_close)){ #NA if the two are the same `draws_rvars`
     for (tv in target_vars){
-      summ <- summarise_draws(priors, median, sd) %>% filter(variable == tv)
+      summ <- summarise_draws(param, median, sd) %>% filter(variable == tv)
       evolve_df[[tv]]$median[cnt] <- as.numeric(summ["median"])
       evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
-      csv_save(priors, delivDir, cnt, type = "each")
+      csv_save(param, delivDir, cnt, type = "each")
       csv_save(evolve_df, delivDir, cnt, type = "each")
       #intv_plot_save(evolve_df[[v]])
     }
-
-    return (priors) # calibrated only for the target
+    return (param) # calibrated only for the target
   }else{
     cnt = cnt + 1
-    return (selfCalib(next_priors, generator_priorvals, predictor, stan_mod, target_vars, n_dataval, n_sample, cnt, evolve_df, delivDir))
+    return (selfCalib(generator, hyperparam, next_param, predictor, backend, target_vars, cnt, evolve_df, delivDir))
   }
 }
 ##' Judge whether the SBC iteration have converged
 ##'
-##' @param priors numeric vector of prior values i.e. parameter values to be tested
+##' @param param numeric vector of prior values i.e. parameter values to be tested
 ##' @param posteriors numeric vector of posterior values i.e. sampled parameter values
-##' @param results computed results with `generator_truepoints(priors), backend)
+##' @param result computed result with `generator_truepoints(param), backend)
 ##' @param target_vars function of parameters with which SBC iteration convergence are judged
 ##' @param n_sample the number of posterior samples for each prior value (default 4000)
 ##' @param cnt function of parameters with which SBC iteration convergence are judged
@@ -58,27 +53,27 @@ selfCalib <- function(priors, generator_priorvals, predictor, hyperparams, stan_
 ##' @param bins the number of bins to discretize samples
 ##' @return distance between prior and posterior samples
 ##' @export
-iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins = 20){
+iter_stop <- function(param, next_param, target_vars, bins = 20){
   if (is.null(target_vars)){
-    post_r_loc <- lapply(next_priors, mean)
-    post_r_scale <- lapply(next_priors, sd)
+    post_r_loc <- lapply(next_param, mean)
+    post_r_scale <- lapply(next_param, sd)
     r_loc <- list()
     r_scale <- list()
-    for (par in names(priors)){
-      r_loc <- append(r_loc, E(priors[[par]]) / post_r_loc[[par]])
-      r_scale <- append(r_scale, sd(priors[[par]]) / post_r_scale[[par]])
+    for (par in names(param)){
+      r_loc <- append(r_loc, E(param[[par]]) / post_r_loc[[par]])
+      r_scale <- append(r_scale, sd(param[[par]]) / post_r_scale[[par]])
     }
     return (all(r_loc > 0.9 && r_loc < 1.1 && r_scale > 0.9 && r_scale < 1.1 ))
   }else{
-    return(all(unlist(lapply(target_vars, FUN = function(tv) {cjs_dist(draws_of(priors[[tv]]), draws_of(next_priors[[tv]])) < 0.1}))))
+    return(all(unlist(lapply(target_vars, FUN = function(tv) {cjs_dist(draws_of(param[[tv]]), draws_of(next_param[[tv]])) < 0.1}))))
   }
 }
 
-# Resample for valid compare between `priors`, `next_priors` and to control `n_priorval`
-# n_priorval * n_sample posterior  n_priorvals as comparison threshold is possible for the same number of samples
+# Resample for valid compare between `param`, `next_param` and to control `S`
+# S * n_sample posterior  Ss as comparison threshold is possible for the same number of samples
 ##'
-##' @param priors numeric vector of prior values i.e. parameter values to be tested
-##' @param results computed results with `generator_truepoints(priors), backend)
+##' @param param numeric vector of prior values i.e. parameter values to be tested
+##' @param result computed result with `generator_truepoints(param), backend)
 ##' @param target_vars function of parameters with which SBC iteration convergence are judged
 ##' @param sumtype types are classified by object and size of compared distribution
 ##'                object: generic parameters vs targeted functions of parameter
@@ -86,31 +81,27 @@ iter_stop <- function(priors, next_priors, results, target_vars, sumtype, bins =
 ##' @param cnt needed to keep track of iteration counts
 ##' @return resampled posterior with prior information
 ##' @export
-adj_post <-function(priors, results, target_vars, sumtype, cnt = 0){
-  n_priorval <- niterations(priors)
-  post_mtr <- SBC_fit_to_draws_matrix(results$fits[[1]])
-  n_sample <- nchains(post_mtr) * niterations(post_mtr) # default nchains = 4
-  priors_tpl <- priors # template
+update_param <-function(param, result, target_vars, cnt = 0, delivDir, thin = 10){
+  S <- ndraws(param[[1]])
+  M <- dim(SBC_fit_to_draws_matrix(result$fits[[1]]))[1] / thin
+  next_param <- param # template
+  #next_param_mtr <- matrix(NA, nrow = S, ncol = S) #summarize n_sample to S
+  g <- list()
   for (tv in target_vars){
-    priors_v <- sort(c(as_draws_df(priors)[[tv]]))
-    post_mtr <- matrix(NA, nrow = n_priorval, ncol = n_sample)
-    post_summ_mtr <- matrix(NA, nrow = n_priorval, ncol = n_priorval) #summarize n_sample to n_priorval
-    for (i in 1:n_priorval){
-      post_mtr[i,] <- c(subset_draws(SBC_fit_to_draws_matrix(results$fits[[i]]), variable = tv))
-      post_summ_mtr[i,] <- draws_of(resample_draws(as_draws(rvar(priors_v)), tabulate(ecdf(priors_v)(c(post_mtr[i,])) * n_priorval, nbins = n_priorval))[[1]])
+    param_ord <- sort(c(as_draws_df(param)[[tv]]))
+    post_mtr <- matrix(NA, nrow = S, ncol = M)
+    for (i in 1:S){
+      fit_mtr <- subset_draws(SBC_fit_to_draws_matrix(result$fits[[i]]), variable = tv) # change for tv, i order?
+      fit_thinned <- posterior::thin_draws(fit_mtr, thin)
+      post_mtr[i,] <- c(fit_thinned)
     }
-    pp_overlay_save(priors_v, post_summ_mtr, tv, cnt)
-    if(n_priorval < 10 || sumtype == "MtoM"){
-      priors_tpl[[tv]] <- rvar(c(post_mtr))
-    }else if(grepl("Mto1", sumtype, fixed = TRUE)){
-      if (sumtype == "Mto1_randpick"){
-        for (i in 1:n_priorval){
-          priors_tpl[[tv]] <- rvar(post_mtr[,i])[sample(1:n_sample, n_priorval)]
-        }
-      }else if (sumtype == "Mto1_reweight"){
-        priors_tpl[[tv]] <- post_summ_mtr[i,]
-      }
-    }
+    next_param_vec <- draws_of(resample_draws(as_draws(rvar(param_ord)), tabulate(ecdf(param_ord)(c(post_mtr)) * S, nbins = S))[[1]])
+    g[[tv]] <- ppc_hist(param_ord, matrix(next_param_vec, ncol = length(param_ord)))
+    next_param[[tv]] <- rvar(next_param_vec)
   }
-  return (priors_tpl)
+  ggarrange(g[[target_vars[1]]], g[[target_vars[2]]], nrow = 2)
+  ggsave(file =  file.path(delivDir, paste0(paste0(paste0(paste(target_vars[1], target_vars[2]), cnt, "_"), "pp.png", sep = ""))),  bg = "white")
+  return (next_param)
 }
+
+

@@ -12,6 +12,7 @@ library(reshape)
 library(parallel)
 library(bayesplot)
 library(posterior)
+library(ggpubr)
 devtools::install_github("hyunjimoon/SBC")
 library(SBC)
 set.seed(1954)
@@ -31,45 +32,54 @@ modelName = "two_normal"
 delivDir <- set_get_Dir(modelName)$delivDir
 file <- set_get_Dir(modelName)$file
 mod_two_norm = cmdstanr::cmdstan_model(file)
-n_priorval = 1000
-n_dataval = 1
-n_sample = 1000
+S = 100
+N = 30
+M = 1000
 predictor = NULL
-generator_priorvals <- function(true_params, n_dataval, predictor, hyperparams){
-  n_priorval = ndraws(true_params)
-  loc = true_params$loc
-  scale = true_params$scale
-  prior_width = hyperparams
-  # temporary bug
-  #y <- rvar_rng(rnorm, n = n_priorval, mean = loc, sd = scale, ndraws = n_dataval) 
-  y <- rfun(rnorm, ndraws = n_dataval)(n = n_priorval, mean = loc, sd = scale)
-  gen_rvars <- draws_rvars(N = n_priorval, y = y, prior_width = prior_width)
+thin_ranks = 10
+chains = 4
+generator <- function(hyperparam, param, predictor = NULL){
+  # hyperparamter
+  N = hyperparam$N
+  prior_width = hyperparam$prior_width
+  # paramter
+  loc = param$loc
+  scale = param$scale
+  # predictor
+  # generate
+  S = ndraws(param[[1]])
+  y <- rvar_rng(rnorm, n = N, mean = loc, sd = scale) #n = N jic
+  gen_rvars <- draws_rvars(N = N, y = y, prior_width = prior_width)
+  # SBC-type reshape e.g. loc rvar<S>[1] distributed to each parallel simulation as rvar<1>[1]
   SBC_datasets(
-    parameters = as_draws_matrix(true_params), 
+    parameters = as_draws_matrix(param), 
     generated = draws_rvars_to_standata(gen_rvars)
   )
 }
-backend_tn <- SBC_backend_cmdstan_sample(mod_two_norm)
-# favorable data region
-pws = c(1, 10, 100)
-#for (prior_width in pws){
+backend_tn <- SBC_backend_cmdstan_sample(mod_two_norm, chains = chains, iter_sampling = M * thin_ranks / chains)
+
 prior_width = 10
-datasets_tn_10 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
-result_tn_10 <- compute_results(datasets_tn_10, backend_tn)
-plot_rank_hist(result_tn_10)
-
-prior_width = 1
-datasets_tn_1 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
-result_tn_1 <- compute_results(datasets_tn_1, backend_tn)
-plot_rank_hist(result_tn_1)
-
-prior_width = 100
-datasets_tn_100 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
-result_tn_100 <- compute_results(datasets_tn_100, backend_tn)
-plot_rank_hist(result_tn_100)
-
-prior_width = 10000
-datasets_tn_10000 <- generator_priorvals(true_params = draws_rvars(loc = rvar(rnorm(n_priorval, 0, prior_width)), scale = rvar(rexp(n_priorval, prior_width))), n_dataval, predictor = predictor, hyperparams = prior_width)
-result_tn_10000 <- compute_results(datasets_tn_10000, backend_tn)
-plot_rank_hist(result_tn_10000)
+datasets_tn <- generator(
+  hyperparam = list(prior_width = prior_width, N = N),
+  param = draws_rvars(loc = rvar(rnorm(S, 0, prior_width)), scale = rvar(exp(rnorm(S, 0, prior_width))))
+)
+result_tn <- compute_results(datasets_tn, backend_tn)
+plot_rank_hist(result_tn)
 ```
+## Calibrating large prior width
+```{r pressure, echo=FALSE}
+# target calibration
+tv = c("loc","scale")
+hyperparam = list(prior_width = prior_width, N = N)
+predictor = NULL
+param_init <- as_draws_rvars(subset_draws(datasets_tn$parameters, variable = tv))
+evolve_df <- list()
+for (v in tv){evolve_df[[v]] <- list(median = rep(NA,1), sd = rep(NA,1))}
+param_sc <- selfCalib(generator, hyperparam, param_init,  predictor, backend_tn, tv, cnt = 1, evolve_df, delivDir)
+datasets_sc <- generator(hyperparam, param_sc, predictor) 
+result_sc <- compute_results(datasets_sc, backend_tn)
+plot_rank_hist(result_sc)
+```
+
+
+

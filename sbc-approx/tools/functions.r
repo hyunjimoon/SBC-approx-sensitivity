@@ -213,10 +213,21 @@ runModel <- function(model, data, iter, warmup, thin, init, seed, chain = 1,
                " refresh=", refresh,
                sep = ""))
 }
-
-pp_overlay_save <- function(prior, post, tv, cnt = 0){
-  ppc_dens_overlay(prior, post) #ppc_dens_overlay(c(draws_of(prior)), c(draws_of(next_prior)))
-  ggsave(file =  file.path(delivDir, paste0(tv, paste0(paste0( cnt, "_"), "pp.png", sep = ""))))
+pp_overlay_save <- function(prior, post, cnt = 0,  tvs = NULL){
+  ppc_hist(prior, post)
+  if(!is.null(tvs)){
+    prior1 <- prior[[tvs[1]]]
+    prior2 <- prior[[tvs[2]]]
+    post1 <- post[[tvs[1]]]
+    post2 <- post[[tvs[2]]]
+    g1 <- ppc_hist(prior1, post1)
+    g2 <- ppc_hist(prior2, post2)
+    #g2 <- ppc_hist(param_v,matrix(post_summ_mtr[2,], ncol = length(y)))
+    ggarrange(g1, g2, nrow =2)
+    ggsave(file =  file.path(delivDir, paste0(tv1, paste0(paste0( cnt, "_"), "pp.png", sep = ""))),  bg = "white")
+    return
+  }
+  ggsave(file =  file.path(delivDir, paste0(tv, paste0(paste0( cnt, "_"), "pp.png", sep = ""))),  bg = "white")
 }
 
 dist_save <- function(sample, delivDir, cnt, type= "each"){

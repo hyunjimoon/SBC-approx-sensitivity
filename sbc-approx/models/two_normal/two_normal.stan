@@ -11,6 +11,6 @@ parameters {
 
 model {
   loc ~ normal(0, prior_width);
-  scale ~ exponential(prior_width);
+  scale ~ lognormal(0, prior_width);
   y ~ normal(loc, scale);
 }
