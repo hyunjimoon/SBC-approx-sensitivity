@@ -36,7 +36,7 @@ selfCalib <- function(generator, hyperparam, param, predictor, backend, target_v
     return (param) # calibrated only for the target
   }else{
     cnt = cnt + 1
-    return (selfCalib(generator, hyperparam, next_param, predictor, backend, target_vars, cnt, evolve_df, delivDir))
+    return (selfCalib(generator, hyperparam, next_param, predictor, backend, target_vars, cnt, thin, evolve_df, delivDir))
   }
 }
 ##' Judge whether the SBC iteration have converged
@@ -81,7 +81,7 @@ iter_stop <- function(param, next_param, target_vars, bins = 20){
 ##' @param cnt needed to keep track of iteration counts
 ##' @return resampled posterior with prior information
 ##' @export
-update_param <-function(param, result, target_vars, cnt = 0, delivDir, thin = 10){
+update_param <-function(param, result, target_vars, cnt = 0, delivDir, thin = thin){
   S <- ndraws(param[[1]])
   M <- dim(SBC_fit_to_draws_matrix(result$fits[[1]]))[1] / thin
   next_param <- param # template

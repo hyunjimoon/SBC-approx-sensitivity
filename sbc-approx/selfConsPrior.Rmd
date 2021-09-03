@@ -34,32 +34,32 @@ modDir <- set_get_Dir(modelName)$modDir
 delivDir <- set_get_Dir(modelName)$delivDir
 file <- set_get_Dir(modelName)$file
 mod_simple_normal = cmdstanr::cmdstan_model(file)
-n_paramval = 30 # the number of generated parameter values for each dataset
-n_dataval = 8 # the number of generated data values for each dataset
-n_sample = 1000 # the number of posterior samples for each dataset (nchains * ndraws)
+S = 30 # the number of generated parameter values for each dataset
+N = 8 # the number of generated data values for each dataset
+M = 1000 # the number of posterior samples for each dataset (nchains * ndraws)
 
 generator <- function(hyperparams, paramvals, predictor = NULL){
   # hyperparamter
-  n_dataval = hyperparams$n_dataval
-  n_paramval <- dim(paramvals[[1]])
-  theta_loc <- rfun(rnorm, ndraws = 1) (n_paramval, rvar_mean(paramvals$theta), 0) #rvar<1>[n_paramval]
-  theta_scale <- rfun(rnorm, ndraws = 1) (n_paramval,rvar_sd(paramvals$theta), 0)
+  N = hyperparams$N
+  S <- dim(paramvals[[1]])
+  theta_loc <- rfun(rnorm, ndraws = 1) (S, rvar_mean(paramvals$theta), 0) #rvar<1>[S]
+  theta_scale <- rfun(rnorm, ndraws = 1) (S,rvar_sd(paramvals$theta), 0)
   # parameter
-  theta <- rfun(rnorm, ndraws = 1)(n = n_paramval, mean = theta_loc, sd = theta_scale) 
+  theta <- rfun(rnorm, ndraws = 1)(n = S, mean = theta_loc, sd = theta_scale) 
   # predictor
   # response
-  y <- rfun(rnorm, ndraws = n_dataval)(n = n_paramval, mean = paramvals$theta, sd = 1) 
-  gen_rvars <- draws_rvars(y = y, theta_loc = theta_loc, theta_scale = theta_scale, D = n_dataval)
+  y <- rfun(rnorm, ndraws = N)(n = S, mean = paramvals$theta, sd = 1) 
+  gen_rvars <- draws_rvars(y = y, theta_loc = theta_loc, theta_scale = theta_scale, D = N)
   SBC_datasets(
     parameters = as_draws_matrix(paramvals),
     generated = draws_rvars_to_standata(gen_rvars)
   )
 }
 datasets <- generator(
-    hyperparams = list(n_dataval = n_dataval),
-  	paramvals = draws_rvars(theta = rfun(rnorm, ndraws = 1) (n = n_paramval, mean = 0, sd = 1))
+    hyperparams = list(N = N),
+  	paramvals = draws_rvars(theta = rfun(rnorm, ndraws = 1) (n = S, mean = 0, sd = 1))
 )
-backend <- SBC_backend_cmdstan_sample(mod_simple_normal, iter_sampling = n_sample)
+backend <- SBC_backend_cmdstaM(mod_simple_normal, iter_sampling = M)
 result <- compute_results(datasets, backend)
 paramvals_init <- as_draws_rvars(subset_draws(datasets$parameters, variable = tv))
 
@@ -70,7 +70,7 @@ predictor = NULL
 paramvals_sc <- selfCalib(generator, hyperparams, paramvals_init, predictor, backend, tv, cnt = 1, evolve_df, delivDir)
 # test self-consistency for paramvals_sc
 datasets_sc <- generator(
-    hyperparams = list(n_dataval = 10),
+    hyperparams = list(N = 10),
   	paramvals = paramvals_sc
 )
 result_sc <- compute_results(datasets_sc, backend) 
@@ -91,32 +91,32 @@ Both numerical (cumulative JS distance: 0.17 vs 0.099) and graphical ecdf indica
 
 ## 2. sgmd model
 ### 2.1.sgmd model1 with different data region; x = rnorm(20, [0, 5], 2) 
-With zero mean for x, datasets from all `prior_width` are good. Generator input consists of true parameter point values `ture_priorvals` and `predictor`. Note the difference in plural and singular. Compared to parameters which has variability between each prior values (rvar<n_paramval>[1], e.g.0.026 ± 0.99), predictor's variability exist only within one datasets. All dataset from each priorpoint have the same value of predictor (rvar<1>[n_paramval]), e.g. 1.4724 ± NA).
+With zero mean for x, datasets from all `prior_width` are good. Generator input consists of true parameter point values `ture_priorvals` and `predictor`. Note the difference in plural and singular. Compared to parameters which has variability between each prior values (rvar<S>[1], e.g.0.026 ± 0.99), predictor's variability exist only within one datasets. All dataset from each priorpoint have the same value of predictor (rvar<1>[S]), e.g. 1.4724 ± NA).
 ```{R sgmd1 with 1/(1+exp^(-wx + b))}
 modelName = "sigmoid"
 delivDir <- set_get_Dir(modelName)$delivDir
 file <- set_get_Dir(modelName)$file
 mod_sgmd = cmdstanr::cmdstan_model(file)
-n_paramval = 200
-n_dataval = 1
-n_sample = 1000
+S = 200
+N = 1
+M = 1000
 prior_width = 10
+thin = 4
 generator_sgmd <- function(hyperparams, paramvals, predictor){
   # hyperparamter
-  n_dataval = hyperparams$n_dataval
-  n_paramval <- ndraws(paramvals)
+  N = hyperparams$N
   sigma = hyperparams$sigma
   prior_width = hyperparams$prior_width
   # paramter
-  w = paramvals$w #n_paramval vector
+  w = paramvals$w #S vector
   b = paramvals$b
   # predictor
   x = predictor$x 
   # generate
-  n_paramval = ndraws(paramvals)
+  ndraws(paramvals[[1]])
   y_true = 1 / (1 + exp(-w*x-b))
-  y <- rfun(rnorm, ndraws = n_dataval)(n = n_paramval, mean = y_true, sd = sigma) 
-  gen_rvars <- draws_rvars(N = n_paramval, x = x, y = y, prior_width = prior_width, sigma = sigma)
+  y <- rfun(rnorm, ndraws = N)(n = S, mean = y_true, sd = sigma) 
+  gen_rvars <- draws_rvars(N = S, x = x, y = y, prior_width = prior_width, sigma = sigma)
   SBC_datasets(
     parameters = as_draws_matrix(paramvals), 
     generated = draws_rvars_to_standata(gen_rvars)
@@ -124,9 +124,9 @@ generator_sgmd <- function(hyperparams, paramvals, predictor){
 }
 backend_sgmd <- SBC_backend_cmdstan_sample(mod_sgmd)
 datasets_sgmd_x0 <- generator_sgmd(
-	paramvals = draws_rvars(w = rvar(rnorm(n_paramval, 0, 1)), b = rvar(rnorm(n_paramval, 0, 1))), 
-	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = n_paramval, 0, 2)), 
-	hyperparams = list(prior_width = 10, sigma = 0.1, n_dataval = 10),
+	paramvals = draws_rvars(w = rvar(rnorm(S, 0, 1)), b = rvar(rnorm(S, 0, 1))), 
+	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = S, 0, 2)), 
+	hyperparams = list(prior_width = 10, sigma = 0.1, N = 10),
 	)
 result_x0 <- compute_results(datasets_sgmd_x0, backend_sgmd)
 plot_rank_hist(result_x0)
@@ -139,9 +139,9 @@ Different data region with the same likelihood and prior distribution can be div
 ```{R, sgmd1 with norm(5,2) dataset}
 set.seed(2000)
 datasets_sgmd_x5_init <- generator_sgmd(
-	paramvals = draws_rvars(w = rvar(rnorm(n_paramval, 0, 1)), b = rvar(rnorm(n_paramval, 0, 1))), 
-	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = n_paramval, 5, 2)), 
-	hyperparams = list(prior_width = 10, sigma = 0.1, n_dataval = 10),
+  hyperparams = list(prior_width = 10, sigma = 0.1, N = 10),
+	paramvals = draws_rvars(w = rvar(rnorm(S, 0, 1)), b = rvar(rnorm(S, 0, 1))), 
+	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = S, 5, 2))
 	)
 result_sgmd_x5_init <- compute_results(datasets_sgmd_x5_init, backend_sgmd)
 plot_ecdf_diff(result_sgmd_x5_init)
@@ -153,12 +153,12 @@ pairs(fit_sgmd_divergent, pars = "energy__", include = FALSE)
 Would changing the `prior width` mitigate the problem? From 10 to 1 or 30? It turns out wider prior width leads to greater divergence.
 ```{R}
 set.seed(1954)
-datasets_sgmd_x5_w30 <-  generator_sgmd(
-	paramvals = draws_rvars(w = rvar(rnorm(n_paramval, 0, 1)), b = rvar(rnorm(n_paramval, 0, 1))), 
-	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = n_paramval, 5, 2)), 
-	hyperparams = list(prior_width = 30, sigma = 0.1, n_dataval = 10),
+datasets_sgmd_x3_w30 <-  generator_sgmd(
+	paramvals = draws_rvars(w = rvar(rnorm(S, 0, 1)), b = rvar(rnorm(S, 0, 1))), 
+	predictor = draws_rvars(x = rfun(rnorm, ndraws = N) (n = S, 3, 2)), 
+	hyperparams = list(prior_width = 1, sigma = 0.1, N = 10)
 	)
-result_sgmd_x5_w30 <- compute_results(datasets_sgmd_x5_w30, backend_sgmd)
+result_sgmd_x3_w30 <- compute_results(datasets_sgmd_x3_w30, backend_sgmd)
 plot_ecdf_diff(result_sgmd_x5_w30)
 fit_sgmd_divergent_w30 <- sampling(rstan::stan_model(file = set_get_Dir(modelName)$file), data = datasets_sgmd_x5_w30$generated[[1]])
 pairs(fit_sgmd_divergent_w30, pars = "energy__", include = FALSE)
@@ -173,14 +173,15 @@ priors_sgmd_x5_init <- as_draws_rvars(subset_draws(datasets_sgmd_x5_w30$paramete
 evolve_df <- list()
 for (v in tv){evolve_df[[v]] <- list(median = rep(NA,1), sd = rep(NA,1))}
 generator_sgmd(
-	paramvals = draws_rvars(w = rvar(rnorm(n_paramval, 0, 1)), b = rvar(rnorm(n_paramval, 0, 1))), 
-	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = n_paramval, 5, 2)), 
-	hyperparams = list(prior_width = 10, sigma = 0.1, n_dataval = 10),
+	paramvals = draws_rvars(w = rvar(rnorm(S, 0, 1)), b = rvar(rnorm(S, 0, 1))), 
+	predictor = draws_rvars(x = rfun(rnorm, ndraws = 1) (n = S, 5, 2)), 
+	hyperparams = list(prior_width = 10, sigma = 0.1, N = 10)
 	)
 
-predictor <- draws_rvars(x = rfun(rnorm, ndraws = 1) (n = n_paramval, 5, 2))
-priors_sgmd_x5_sc <- selfCalib(generator_sgmd, priors_sgmd_x5_init, predictor, hyperparams, mod_sgmd, tv, n_dataval, n_sample, cnt = 1, evolve_df, delivDir)
-datasets_sgmd_x5_sc <- generator_priorvals_sgmd(priors_sgmd_x5_sc, n_dataval, predictor) 
+predictor <- draws_rvars(x = rfun(rnorm, ndraws = 1) (n = S, 5, 2))
+#inerator, hyperparam, param, predictor, backend, target_vars, cnt, thin, evolve_df, delivDir
+priors_sgmd_x5_sc <- selfCalib(generator_sgmd, hyperparams, priors_sgmd_x5_init, predictor, backend_sgmd, tv, cnt = 1,thin, evolve_df, delivDir)
+datasets_sgmd_x5_sc <- generator_priorvals_sgmd(priors_sgmd_x5_sc, N, predictor) 
 result_sgmd_x5_sc <- compute_results(datasets_sgmd_x5_sc, backend_sgmd)
 
 # before after compare with graphical and numerical summary

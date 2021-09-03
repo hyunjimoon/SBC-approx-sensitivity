@@ -1,8 +1,11 @@
 data {
+  // hyperparams
   int D;
-  vector[D] y;
   real theta_loc;
-  real theta_scale;
+  real <lower = 0> theta_scale;
+  // outcome
+  vector[D] y;
+
 }
 parameters {
   real theta;
