@@ -14,14 +14,14 @@ source("tools/functions.r")
 ##' @return  next param summarized from `S` * `n_sample` posterior samples
 ##' @export
 
-selfCalib <- function(generator, hyperparam, param, predictor, backend, target_vars, cnt, evolve_df, delivDir){
-  result <- compute_results(generator(hyperparam, param, predictor), backend)
+selfCalib <- function(generator, hyperparam, param, predictor, backend, target_vars, cnt, thin, evolve_df, delivDir){
+  result <- compute_results(generator(hyperparam, param, predictor), backend, thin = thin)
   for (tv in target_vars){
     summ <- summarise_draws(param, median, sd) %>% filter(variable == tv)
     evolve_df[[tv]]$median[cnt] <- as.numeric(summ["median"])
     evolve_df[[tv]]$sd[cnt] <- as.numeric(summ["sd"])
   }
-  next_param <- update_param(param, result, target_vars, cnt, delivDir)
+  next_param <- update_param(param, result, target_vars, cnt, delivDir, thin = thin)
   param_next_param_close <- iter_stop(param, next_param, result, target_vars = NULL)
   # iter_stop much stabilized when S vs S compared to S vs S * 4000 (= n_sample)
   if (param_next_param_close || is.na(param_next_param_close)){ #NA if the two are the same `draws_rvars`

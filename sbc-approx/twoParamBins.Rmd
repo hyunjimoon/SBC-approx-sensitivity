@@ -32,11 +32,11 @@ modelName = "two_normal"
 delivDir <- set_get_Dir(modelName)$delivDir
 file <- set_get_Dir(modelName)$file
 mod_two_norm = cmdstanr::cmdstan_model(file)
-S = 100
-N = 30
-M = 1000
+S = 300
+N = 5
+M = 100
 predictor = NULL
-thin_ranks = 10
+thin = 4
 chains = 4
 generator <- function(hyperparam, param, predictor = NULL){
   # hyperparamter
@@ -48,7 +48,7 @@ generator <- function(hyperparam, param, predictor = NULL){
   # predictor
   # generate
   S = ndraws(param[[1]])
-  y <- rvar_rng(rnorm, n = N, mean = loc, sd = scale) #n = N jic
+  y <- rfun(rnorm) (n = N, mean = loc, sd = scale) #rvar_rng(rnorm, n = N, mean = loc, sd = scale) 
   gen_rvars <- draws_rvars(N = N, y = y, prior_width = prior_width)
   # SBC-type reshape e.g. loc rvar<S>[1] distributed to each parallel simulation as rvar<1>[1]
   SBC_datasets(
@@ -56,15 +56,16 @@ generator <- function(hyperparam, param, predictor = NULL){
     generated = draws_rvars_to_standata(gen_rvars)
   )
 }
-backend_tn <- SBC_backend_cmdstan_sample(mod_two_norm, chains = chains, iter_sampling = M * thin_ranks / chains)
+backend_tn <- SBC_backend_cmdstan_sample(mod_two_norm, chains = chains, iter_sampling = M * thin / chains)
 
-prior_width = 10
+prior_width = 100
 datasets_tn <- generator(
   hyperparam = list(prior_width = prior_width, N = N),
   param = draws_rvars(loc = rvar(rnorm(S, 0, prior_width)), scale = rvar(exp(rnorm(S, 0, prior_width))))
 )
 result_tn <- compute_results(datasets_tn, backend_tn)
 plot_rank_hist(result_tn)
+
 ```
 ## Calibrating large prior width
 ```{r pressure, echo=FALSE}
@@ -75,11 +76,10 @@ predictor = NULL
 param_init <- as_draws_rvars(subset_draws(datasets_tn$parameters, variable = tv))
 evolve_df <- list()
 for (v in tv){evolve_df[[v]] <- list(median = rep(NA,1), sd = rep(NA,1))}
-param_sc <- selfCalib(generator, hyperparam, param_init,  predictor, backend_tn, tv, cnt = 1, evolve_df, delivDir)
+param_sc <- selfCalib(generator, hyperparam, param_init,  predictor, backend_tn, tv, cnt = 1, thin, evolve_df, delivDir)
 datasets_sc <- generator(hyperparam, param_sc, predictor) 
 result_sc <- compute_results(datasets_sc, backend_tn)
 plot_rank_hist(result_sc)
 ```
-
 
 
